@@ -107,9 +107,13 @@ def _graph(model):
     return plan, float(optimum.fun)
 
 
-def compare(model):
+def hamming_costs(model):
     bits = np.array([list(state) for state in model.states])
-    costs = (bits[:, None, :] != bits[None, :, :]).sum(axis=-1)
+    return (bits[:, None, :] != bits[None, :, :]).sum(axis=-1)
+
+
+def compare(model):
+    costs = hamming_costs(model)
     constrained = _graph(model)
     ordinary = _ordinary(model, costs)
     result = {"states": list(model.states)}

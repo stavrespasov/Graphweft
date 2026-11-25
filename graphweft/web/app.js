@@ -4,6 +4,9 @@ const operation = byId("operation");
 const modelField = byId("model");
 const planField = byId("plan");
 const runButton = byId("run");
+const openButton = byId("open-run");
+const saveButton = byId("save-run");
+const runFile = byId("run-file");
 const status = byId("status");
 const results = byId("results");
 const findings = byId("finding");
@@ -13,8 +16,10 @@ const labels = {
   candidate: "Supplied plan",
 };
 const numberFormat = new Intl.NumberFormat("en", { maximumFractionDigits: 5 });
+const maxRunBytes = 1024 * 1024;
 let examples = [];
 let request;
+let completedRun;
 let reports = {};
 let inspectedPlan;
 
@@ -54,12 +59,16 @@ function updateOperation() {
   runButton.textContent = auditing ? "Run audit" : "Run comparison";
 }
 
+function fillInputs(input) {
+  operation.value = input.operation;
+  modelField.value = JSON.stringify(input.model, null, 2);
+  planField.value = input.plan ? JSON.stringify(input.plan) : "";
+  updateOperation();
+}
+
 function selectPreset() {
   const selected = examples.find(({ id }) => id === preset.value);
-  operation.value = selected.operation;
-  modelField.value = JSON.stringify(selected.model, null, 2);
-  planField.value = selected.plan ? JSON.stringify(selected.plan) : "";
-  updateOperation();
+  fillInputs(selected);
   void runExperiment();
 }
 
@@ -228,32 +237,44 @@ function renderResult(data, model, mode) {
   results.hidden = false;
 }
 
-async function runExperiment() {
+function clearResult() {
+  completedRun = undefined;
+  saveButton.disabled = true;
+  results.hidden = true;
+  byId("graph").hidden = true;
+}
+
+async function postRun(path, body, signal) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+    signal,
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error);
+  return data;
+}
+
+async function requestRun(message, load, imported = false) {
   request?.abort();
   const active = new AbortController();
   request = active;
-  const mode = operation.value;
   runButton.disabled = true;
-  status.textContent = mode === "compare" ? "Solving transport…" : "Checking the plan…";
+  status.textContent = message;
   status.classList.remove("error");
-  results.hidden = true;
-  byId("graph").hidden = true;
-
+  clearResult();
   try {
-    const model = parse(modelField, "model");
-    const payload = { model };
-    if (mode === "audit") payload.plan = parse(planField, "coupling matrix");
-    const response = await fetch(`/api/${mode}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: active.signal,
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error);
+    const run = await load(active.signal);
     if (request !== active) return;
-    renderResult(data, model, mode);
-    status.textContent = "";
+    if (imported) {
+      preset.value = "imported";
+      fillInputs(run.input);
+    }
+    renderResult(run.result, run.input.model, run.input.operation);
+    completedRun = run;
+    saveButton.disabled = false;
+    status.textContent = imported ? "Saved run verified." : "";
   } catch (error) {
     if (request !== active) return;
     status.textContent = error.message || "GraphWeft could not complete the operation.";
@@ -263,12 +284,20 @@ async function runExperiment() {
   }
 }
 
+function runExperiment() {
+  const mode = operation.value;
+  return requestRun(mode === "compare" ? "Solving transport…" : "Checking the plan…", (signal) => {
+    const payload = { operation: mode, model: parse(modelField, "model") };
+    if (mode === "audit") payload.plan = parse(planField, "coupling matrix");
+    return postRun("/api/run", JSON.stringify(payload), signal);
+  });
+}
+
 preset.addEventListener("change", selectPreset);
 operation.addEventListener("change", () => {
   request?.abort();
   request = undefined;
-  results.hidden = true;
-  byId("graph").hidden = true;
+  clearResult();
   status.textContent = "";
   runButton.disabled = !examples.length;
   updateOperation();
@@ -278,6 +307,33 @@ findings.addEventListener("change", renderEvidence);
 byId("experiment").addEventListener("submit", (event) => {
   event.preventDefault();
   void runExperiment();
+});
+openButton.addEventListener("click", () => runFile.click());
+runFile.addEventListener("change", () => {
+  const file = runFile.files[0];
+  runFile.value = "";
+  if (!file) return;
+  void requestRun("Verifying saved run…", async (signal) => {
+    if (file.size > maxRunBytes) throw new Error("Run files are limited to 1 MiB.");
+    return postRun("/api/replay", await file.text(), signal);
+  }, true);
+});
+saveButton.addEventListener("click", () => {
+  if (!completedRun) return;
+  const file = new Blob([JSON.stringify(completedRun, null, 2) + "\n"], { type: "application/json" });
+  if (file.size > maxRunBytes) {
+    status.textContent = "This result exceeds the 1 MiB run-file limit.";
+    status.classList.add("error");
+    return;
+  }
+  const link = element("a");
+  const url = URL.createObjectURL(file);
+  link.href = url;
+  link.download = `graphweft-${completedRun.input.operation}-${completedRun.manifest.input_sha256.slice(0, 8)}.json`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 
 try {
@@ -289,7 +345,12 @@ try {
     option.value = example.id;
     preset.append(option);
   }
+  const importedOption = element("option", "Imported run");
+  importedOption.value = "imported";
+  importedOption.hidden = true;
+  preset.append(importedOption);
   preset.disabled = false;
+  openButton.disabled = false;
   selectPreset();
 } catch (error) {
   status.textContent = error.message || "GraphWeft could not load its examples.";

@@ -4,12 +4,24 @@ import sys
 from pathlib import Path
 
 from .audit import audit_plan
+from .experiments import MAX_RUN_BYTES, verify_run
 from .model import Model
 from .transport import compare
 
 
 def read_json(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def read_run(path):
+    with Path(path).open("rb") as source:
+        contents = source.read(MAX_RUN_BYTES + 1)
+    if len(contents) > MAX_RUN_BYTES:
+        raise ValueError("Run files are limited to 1 MiB.")
+    try:
+        return json.loads(contents)
+    except RecursionError:
+        raise ValueError("The run file is nested too deeply.") from None
 
 
 def summarize(report):
@@ -28,6 +40,8 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     browser = commands.add_parser("serve", help="open a local browser workbench")
     browser.add_argument("--port", type=int, default=8765, help="loopback port (default: 8765)")
+    verification = commands.add_parser("verify-run", help="recheck the claims in a saved run")
+    verification.add_argument("file", help="GraphWeft run JSON file")
     for name, help_text in (
         ("compare", "solve ordinary and graph-bicausal transport"),
         ("audit", "test a supplied coupling against the graph"),
@@ -44,6 +58,16 @@ def main(argv=None):
             from .server import serve
 
             serve(args.port)
+            return 0
+        if args.command == "verify-run":
+            run = verify_run(read_run(args.file))
+            operation = run["input"]["operation"]
+            result = {"verified": True, "operation": operation, "input_sha256": run["manifest"]["input_sha256"]}
+            if operation == "compare":
+                result["costs"] = {name: run["result"][name]["cost"] for name in ("ordinary", "constrained")}
+            else:
+                result["admissible"] = run["result"]["audit"]["admissible"]
+            print(json.dumps(result, indent=2, allow_nan=False))
             return 0
         model = Model.from_dict(read_json(args.model))
         status = 0

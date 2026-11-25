@@ -89,3 +89,21 @@ class WorkbenchTests(unittest.TestCase):
 
         status, _, _ = self.request("GET", "/missing")
         self.assertEqual(status, 404)
+
+    def test_run_can_be_saved_and_replayed(self):
+        model = json.loads((EXAMPLES / "binary_chain.json").read_text())
+        headers = {"Content-Type": "application/json"}
+        status, _, payload = self.request("POST", "/api/run", json.dumps({
+            "operation": "compare", "model": model,
+        }), headers)
+        self.assertEqual(status, 200)
+        run = json.loads(payload)
+        self.assertEqual(run["result"]["cost_gap"], 0.5)
+
+        status, _, payload = self.request("POST", "/api/replay", json.dumps(run), headers)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(payload), run)
+        run["result"]["cost_gap"] = 1.5
+        status, _, payload = self.request("POST", "/api/replay", json.dumps(run), headers)
+        self.assertEqual(status, 422)
+        self.assertIn("cost gap", json.loads(payload)["error"])

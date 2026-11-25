@@ -36,6 +36,11 @@
           </details>
           <button type="submit" id="run" disabled>Run comparison</button>
         </form>
+        <div class="run-files" role="group" aria-label="Run files">
+          <button id="open-run" type="button" disabled>Open run</button>
+          <button id="save-run" type="button" disabled>Save run</button>
+          <input id="run-file" type="file" accept=".json,application/json" hidden>
+        </div>
 
         <section class="graph" id="graph" aria-labelledby="graph-heading" hidden>
           <h3 id="graph-heading">Model graph</h3>

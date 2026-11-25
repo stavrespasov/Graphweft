@@ -46,6 +46,10 @@ button { min-height: 2.65rem; padding: .4rem .65rem; border: 1px solid var(--blu
 button[type="submit"] { width: 100%; background: var(--blue); color: white; }
 button[type="submit"]:hover { background: var(--blue-dark); }
 button:disabled, select:disabled { opacity: .55; cursor: wait; }
+.run-files { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .4rem; margin-top: .55rem; }
+.run-files button { background: var(--surface); color: var(--blue-dark); }
+.run-files button:hover:not(:disabled) { background: #e4ecec; }
+.run-files button:disabled { cursor: default; }
 .graph { border-top: 1px solid var(--line); padding-top: .9rem; margin-top: 1.15rem; }
 .graph ul { list-style: none; padding: 0; margin: .5rem 0 0; font: .82rem/1.75 var(--mono); overflow-wrap: anywhere; }
 #status:not(:empty) { margin-bottom: .7rem; color: var(--muted); }

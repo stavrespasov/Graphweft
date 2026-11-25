@@ -3,6 +3,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 
 from .audit import audit_plan
+from .experiments import MAX_RUN_BYTES, create_run, verify_run
 from .model import Model
 from .transport import compare
 
@@ -92,7 +93,7 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._allow_local():
             return
-        if self.path not in ("/api/compare", "/api/audit"):
+        if self.path not in ("/api/compare", "/api/audit", "/api/run", "/api/replay"):
             self._json(404, {"error": "Operation not found."})
             return
         if self.headers.get_content_type() != "application/json":
@@ -102,24 +103,30 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             size = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             size = 0
-        if size > _MAX_BODY_BYTES:
-            self._json(413, {"error": "Input exceeds 64 KiB."})
+        replay = self.path == "/api/replay"
+        if size > (MAX_RUN_BYTES if replay else _MAX_BODY_BYTES):
+            self._json(413, {"error": "Run files are limited to 1 MiB." if replay else "Input exceeds 64 KiB."})
             return
         try:
             data = json.loads(self.rfile.read(max(0, size)))
             if not isinstance(data, dict):
                 raise ValueError
-        except ValueError:
+        except (ValueError, RecursionError):
             self._json(400, {"error": "Send a valid JSON object."})
             return
 
         try:
-            model = Model.from_dict(data.get("model"))
-            if self.path == "/api/compare":
-                result = compare(model)
+            if replay:
+                result = verify_run(data)
+            elif self.path == "/api/run":
+                result = create_run(data)
             else:
-                plan = data.get("plan")
-                result = {"states": list(model.states), "plan": plan, "audit": audit_plan(model, plan)}
+                model = Model.from_dict(data.get("model"))
+                if self.path == "/api/compare":
+                    result = compare(model)
+                else:
+                    plan = data.get("plan")
+                    result = {"states": list(model.states), "plan": plan, "audit": audit_plan(model, plan)}
         except ValueError as error:
             self._json(422, {"error": str(error)})
         except RuntimeError:

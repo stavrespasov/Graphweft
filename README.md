@@ -13,6 +13,16 @@ python -m graphweft serve
 
 Open [http://127.0.0.1:8765](http://127.0.0.1:8765). The fork example opens with both coupling matrices on the same color scale. Select either plan in the audit panel to see the failed conditions or confirm the checks passed. Choose **Shared-coin audit** to compare the two conditional distributions at node C. Open **Edit inputs** to run your own model or supply a coupling matrix. The workbench uses the local Python solver.
 
+## Save and verify a run
+
+Select **Save run** after a comparison or audit. The JSON file contains the inputs, coupling matrices, costs where applicable, audit findings, an input checksum, and the Python, NumPy and SciPy versions. **Open run** checks that file with the current solver before displaying the saved plans. GraphWeft checks the saved plans and costs independently of which optimal coupling the solver happens to return on replay.
+
+```sh
+python -m graphweft verify-run path/to/saved-run.json
+```
+
+A verified audit can still report an inadmissible plan. For example, replay verifies that the shared-coin run correctly reports the dependence violation at node C. Run files are limited to 1 MiB.
+
 ## Command line
 
 ```sh
