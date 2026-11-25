@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A local workbench for graph-bicausal transport and plan audits.">
+  <title>GraphWeft</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <main class="workspace">
+    <header class="masthead">
+      <h1>GraphWeft</h1>
+      <p>Compare transport plans and inspect the probability constraints behind each result.</p>
+    </header>
+
+    <div class="layout">
+      <aside class="controls" aria-labelledby="experiment-heading">
+        <h2 id="experiment-heading">Experiment</h2>
+        <form id="experiment">
+          <label class="field">Example <select id="preset" disabled></select></label>
+          <label class="field">Operation
+            <select id="operation">
+              <option value="compare">Compare transport</option>
+              <option value="audit">Audit a supplied plan</option>
+            </select>
+          </label>
+          <details id="inputs">
+            <summary>Edit inputs</summary>
+            <label class="field">Model JSON <textarea id="model" rows="11" spellcheck="false"></textarea></label>
+            <label class="field" id="plan-field" hidden>Coupling matrix JSON
+              <textarea id="plan" rows="8" spellcheck="false"></textarea>
+            </label>
+          </details>
+          <button type="submit" id="run" disabled>Run comparison</button>
+        </form>
+
+        <section class="graph" id="graph" aria-labelledby="graph-heading" hidden>
+          <h3 id="graph-heading">Model graph</h3>
+          <ul id="edges"></ul>
+        </section>
+      </aside>
+
+      <div class="output">
+        <p id="status" role="status"></p>
+        <div id="results" hidden>
+          <section class="section" aria-labelledby="plan-heading">
+            <header class="section-heading">
+              <div>
+                <h2 id="plan-heading">Transport plans</h2>
+                <p>Coupling mass by source row and target column.</p>
+              </div>
+              <p id="gap" class="gap"></p>
+            </header>
+            <div id="plans" class="plans"></div>
+          </section>
+
+          <section class="section audit" aria-labelledby="audit-heading">
+            <header class="section-heading">
+              <div>
+                <h2 id="audit-heading">Plan audit</h2>
+                <p id="audit-status"></p>
+              </div>
+              <div id="audit-options" class="audit-options" role="group" aria-label="Plan to inspect"></div>
+            </header>
+            <label id="finding-field" class="field finding" hidden>
+              Failed condition <select id="finding"></select>
+            </label>
+            <div id="evidence"></div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

@@ -26,6 +26,8 @@ def summarize(report):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Compare Hamming transport plans and audit graph-bicausality.")
     commands = parser.add_subparsers(dest="command", required=True)
+    browser = commands.add_parser("serve", help="open a local browser workbench")
+    browser.add_argument("--port", type=int, default=8765, help="loopback port (default: 8765)")
     for name, help_text in (
         ("compare", "solve ordinary and graph-bicausal transport"),
         ("audit", "test a supplied coupling against the graph"),
@@ -38,6 +40,11 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
     try:
+        if args.command == "serve":
+            from .server import serve
+
+            serve(args.port)
+            return 0
         model = Model.from_dict(read_json(args.model))
         status = 0
         if args.command == "audit":

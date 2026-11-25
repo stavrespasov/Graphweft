@@ -2,12 +2,20 @@
 
 GraphWeft compares ordinary optimal transport with **graph-bicausal optimal transport** on a supplied directed acyclic graph. It shows how an information constraint changes the lowest transport cost and pinpoints the conditional probabilities that make a plan inadmissible.
 
-## Quick start
+## Browser workbench
 
 From the repository root, use Python 3.10 or newer in a virtual environment.
 
 ```sh
 python -m pip install -e .
+python -m graphweft serve
+```
+
+Open [http://127.0.0.1:8765](http://127.0.0.1:8765). The fork example opens with both coupling matrices on the same color scale. Select either plan in the audit panel to see the failed conditions or confirm the checks passed. Choose **Shared-coin audit** to compare the two conditional distributions at node C. Open **Edit inputs** to run your own model or supply a coupling matrix. The workbench uses the local Python solver.
+
+## Command line
+
+```sh
 python -m graphweft compare examples/binary_chain.json --summary
 ```
 

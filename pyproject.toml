@@ -11,3 +11,6 @@ dependencies = ["numpy>=1.24", "scipy>=1.11"]
 
 [tool.setuptools.packages.find]
 include = ["graphweft*"]
+
+[tool.setuptools.package-data]
+graphweft = ["web/*.html", "web/*.js", "web/*.css"]
