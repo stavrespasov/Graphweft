@@ -15,7 +15,7 @@ Open [http://127.0.0.1:8765](http://127.0.0.1:8765). The fork example opens with
 
 ## Save and verify a run
 
-Select **Save run** after a comparison or audit. The JSON file contains the inputs, coupling matrices, costs where applicable, audit findings, an input checksum, and the Python, NumPy and SciPy versions. **Open run** checks that file with the current solver before displaying the saved plans. GraphWeft checks the saved plans and costs independently of which optimal coupling the solver happens to return on replay.
+Select **Save run** after a comparison or audit. The JSON file contains the inputs, coupling matrices, costs where applicable, audit findings, an input checksum, and the Python, NumPy and solver library versions. **Open run** recomputes the optimum with the installed solver and checks the saved witness before displaying it. Any feasible plan that attains the same cost within solver tolerance can pass replay.
 
 ```sh
 python -m graphweft verify-run path/to/saved-run.json
@@ -53,9 +53,17 @@ In this fork, node A is the parent of B and C. The supplied coupling uses one sh
 
 This example returns exit code `1` for an inadmissible plan and prints the failed condition. A passing audit returns `0`. An input or solver error returns `2`.
 
+### Check rare states
+
+The **Rare-state chain** preset has a source state with probability `1e-12`. Ordinary OT costs `1e-12`. The graph-constrained plan must preserve the target's conditional law of B even where A is rare, and costs `2e-12`. Audits identify missing states, unexpected states, and states with the wrong positive mass. [Rare-state fixture](examples/rare_state_chain.json)
+
+```sh
+python -m graphweft compare examples/rare_state_chain.json --summary
+```
+
 ## Use your own model
 
-Start from [the chain fixture](examples/binary_chain.json). Define one to four binary nodes in topological order and list the parents of each node. The source and target vectors assign mass to lexicographically ordered bit strings. For two nodes, the order is `00`, `01`, `10`, `11`. Both probability laws must factor according to the graph.
+Start from [the chain fixture](examples/binary_chain.json). Define one to four binary nodes in topological order and list the parents of each node. The source and target vectors assign mass to lexicographically ordered bit strings. For two nodes, the order is `00`, `01`, `10`, `11`. Both probability laws must factor according to the graph. Reconstruction must preserve every zero and match each positive state mass within a relative tolerance of `1e-10`.
 
 The solver and auditor accept any DAG on one to four binary nodes. An audit input is a JSON coupling matrix whose rows follow source-state order and whose columns follow target-state order.
 
@@ -111,11 +119,13 @@ Omit `--summary` for the original run and each candidate's expanded run and cros
 
 ## Method and verification
 
-The ordinary solver uses a full-coupling LP in SciPy/HiGHS. For perfect DAGs, where every node's parents form a clique, the constrained solver uses one LP over the paired state at each node and its parents. Linear constraints match each input’s local marginals and enforce consistency between overlapping tables. The conditional kernels reconstruct the plan. [Kernel characterization and graph-separable costs, Propositions 4.7 and 5.2–5.3](https://arxiv.org/html/2608.13716v1)
+The ordinary solver uses integer min-cost flow. It encodes the input floats as integer weights and uses a common supply and demand total, so the solver preserves small positive masses during optimization. The returned plan uses floating-point probabilities. [NetworkX network simplex](https://networkx.org/documentation/stable/reference/algorithms/generated/networkx.algorithms.flow.network_simplex.html)
+
+For perfect DAGs, where every node's parents form a clique, the constrained solver works backward. It minimizes the local cost plus all downstream terms already assigned to that node. It then adds the minimized cost as a function on the paired parents to the family of the last parent in node order. All those parents fit in that family because they form a clique. The selected kernels reconstruct the plan, including small positive histories. [Kernel characterization and dynamic programming, Propositions 4.7 and 5.2–5.3](https://arxiv.org/html/2608.13716v1)
 
 For other DAGs, the solver searches endpoints of the binary coupling intervals. At each paired parent context, the `(0, 0)` mass fixes the other three entries. Each joint outcome multiplies one kernel entry per node, so the expected cost is affine in each interval coordinate when the others are fixed. A minimum therefore occurs at some combination of endpoints. The search skips unreachable contexts and minimizes the final node's cost independently at each of its parent contexts. The number of combinations can grow exponentially, so the implementation is scoped to four nodes.
 
-The audit checks joint marginals, prescribed conditional marginals, and the dependence of each paired state on earlier pairs. Custom objectives are scaled by the sum of the maximum local costs when that sum is positive. Costs are displayed in their original units. Verification checks probability audits at an absolute tolerance of `1e-8` and custom objective values at that tolerance in solver units.
+The audit checks joint marginals, prescribed conditional marginals, and the dependence of each paired state on earlier pairs. Joint marginal support must agree with the model. Each positive state mass is checked at a relative tolerance of `1e-8`, and conditional distributions are checked at an absolute tolerance of `1e-8`. Custom objectives are scaled by the sum of the maximum local costs when that sum is positive. Costs are displayed in their original units and verified at `1e-8` in solver units. Legacy run files are replayed with the current checks.
 
 GraphWeft focuses on inspecting graph-specific plans. Existing implementations of time-adapted transport provide related numerical baselines. [AOTNumerics](https://github.com/stephaneckstein/aotnumerics) [PNOT](https://github.com/justinhou95/NestedOT)
 
@@ -123,4 +133,4 @@ GraphWeft focuses on inspecting graph-specific plans. Existing implementations o
 python -m unittest discover -s tests -v
 ```
 
-The tests check the cost gaps, the shared-coin counterexample, empty-graph decomposition, and agreement with ordinary OT for a single node. They cover all 64 four-node graphs in a fixed node order on a product-law fixture and compare the collider solver against independent enumeration. Edge comparison tests check that adding a parent preserves the entire cost matrix and that both resulting runs can be verified.
+The tests check the cost gaps, the shared-coin counterexample, empty-graph decomposition, and agreement with ordinary OT for a single node. They cover all 64 four-node graphs in a fixed node order on a product-law fixture, compare the collider solver against independent enumeration, and cover rare-state chains with masses down to `1e-100`. Edge comparison tests check that adding a parent preserves the entire cost matrix and that both resulting runs can be verified.

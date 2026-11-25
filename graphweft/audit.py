@@ -19,9 +19,18 @@ def audit_plan(model, candidate):
     for side, observed, required in (
         ("source", plan.sum(axis=1), model.source), ("target", plan.sum(axis=0), model.target)
     ):
-        error = float(np.max(np.abs(observed - required)))
-        if error > AUDIT_TOLERANCE:
-            failures.append({"kind": "joint_marginal", "side": side, "max_absolute_error": error})
+        errors = np.abs(observed - required)
+        missing = (observed == 0) & (required > 0)
+        unexpected = (observed > 0) & (required == 0)
+        misweighted = (observed > 0) & (required > 0) & (errors > AUDIT_TOLERANCE * required)
+        if missing.any() or unexpected.any() or misweighted.any():
+            finding = {"kind": "joint_marginal", "side": side, "max_absolute_error": float(errors.max())}
+            for key, mask in (
+                ("missing_states", missing), ("unexpected_states", unexpected), ("misweighted_states", misweighted),
+            ):
+                if mask.any():
+                    finding[key] = [state for state, match in zip(model.states, mask) if match]
+            failures.append(finding)
 
     paired = paired_tensor(plan, width)
     for node, parents in enumerate(model.parents):

@@ -53,6 +53,14 @@ def demo_examples():
             },
         },
         {
+            "id": "rare-state-chain", "label": "Rare-state chain", "operation": "compare",
+            "model": {
+                "nodes": ["A", "B"], "parents": {"A": [], "B": ["A"]},
+                "source": [0.999999999999, 0, 0, 1e-12],
+                "target": [0.999999999998, 0, 1e-12, 1e-12],
+            },
+        },
+        {
             "id": "collider", "label": "Binary collider", "operation": "compare",
             "model": collider_model,
         },

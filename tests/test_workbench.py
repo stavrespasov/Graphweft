@@ -44,7 +44,8 @@ class WorkbenchTests(unittest.TestCase):
         self.assertEqual(status, 200)
         examples = {entry["id"]: entry for entry in json.loads(payload)}
         for key, filename in (("fork", "binary_fork.json"), ("weighted-fork", "parent_weighted_fork.json"),
-                              ("chain", "binary_chain.json"), ("collider", "binary_collider.json"),
+                              ("chain", "binary_chain.json"), ("rare-state-chain", "rare_state_chain.json"),
+                              ("collider", "binary_collider.json"),
                               ("ordered-control", "ordered_control.json"),
                               ("four-node-collider", "four_node_collider.json"),
                               ("shared-coin", "shared_coin_model.json")):

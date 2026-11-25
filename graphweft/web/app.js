@@ -175,8 +175,17 @@ function renderEvidence() {
   }
 
   if (failure.kind === "joint_marginal") {
-    panel.append(element("p", `The plan’s ${failure.side} marginal differs from the model.`),
-      element("p", `Maximum absolute error ${format(failure.max_absolute_error)}`, "context"));
+    panel.append(element("p", `The plan’s ${failure.side} marginal differs from the model.`));
+    if (failure.missing_states) {
+      panel.append(element("p", `Missing probability mass at ${failure.missing_states.join(", ")}.`));
+    }
+    if (failure.unexpected_states) {
+      panel.append(element("p", `Unexpected probability mass at ${failure.unexpected_states.join(", ")}.`));
+    }
+    if (failure.misweighted_states) {
+      panel.append(element("p", `Wrong probability mass at ${failure.misweighted_states.join(", ")}.`));
+    }
+    panel.append(element("p", `Maximum absolute error ${format(failure.max_absolute_error)}`, "context"));
     return;
   }
 

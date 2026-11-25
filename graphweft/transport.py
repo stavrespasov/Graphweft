@@ -1,8 +1,8 @@
 from itertools import product
-from math import isclose, isfinite, prod
+from math import isclose, isfinite, lcm, prod
 
+import networkx as nx
 import numpy as np
-from scipy.optimize import linprog
 
 from .audit import PAIRS, audit_plan
 from .model import AUDIT_TOLERANCE, paired_tensor
@@ -10,32 +10,36 @@ from .model import AUDIT_TOLERANCE, paired_tensor
 _HAMMING_PAIR = np.array([int(x != y) for x, y in PAIRS])
 
 
-def _solve(objective, rows, targets):
-    solution = linprog(
-        objective, A_eq=rows, b_eq=targets, method="highs",
-        options={"primal_feasibility_tolerance": 1e-9, "dual_feasibility_tolerance": 1e-9},
-    )
-    if not solution.success:
-        raise RuntimeError(f"HiGHS failed with status {solution.status}: {solution.message}")
-    residual = np.max(np.abs(np.asarray(rows) @ solution.x - targets))
-    if residual > AUDIT_TOLERANCE:
-        raise RuntimeError("HiGHS primal residual exceeds the audit tolerance")
-    return solution
+def _integer_units(values):
+    # Every finite float is a dyadic rational, so the largest denominator is a common one.
+    ratios = [float(value).as_integer_ratio() for value in values]
+    scale = max(denominator for _, denominator in ratios)
+    return [numerator * (scale // denominator) for numerator, denominator in ratios], scale
 
 
 def _ordinary(model, costs):
-    size = len(model.source)
-    rows = []
-    for state in range(size):
-        row = np.zeros((size, size))
-        row[state, :] = 1
-        rows.append(row.ravel())
-    for state in range(size):
-        row = np.zeros((size, size))
-        row[:, state] = 1
-        rows.append(row.ravel())
-    optimum = _solve(costs.ravel(), rows, np.r_[model.source, model.target])
-    return optimum.x.reshape(size, size), float(optimum.fun)
+    # Normalize the two integer measures separately to the same total supply and demand.
+    source, _ = _integer_units(model.source)
+    target, _ = _integer_units(model.target)
+    source_total, target_total = sum(source), sum(target)
+    total = lcm(source_total, target_total)
+    supply = {i: mass * (total // source_total) for i, mass in enumerate(source) if mass > 0}
+    demand = {j: mass * (total // target_total) for j, mass in enumerate(target) if mass > 0}
+    weights, cost_scale = _integer_units(costs.ravel())
+    size = len(source)
+
+    graph = nx.DiGraph()
+    graph.add_nodes_from((i, {"demand": -mass}) for i, mass in supply.items())
+    graph.add_nodes_from((size + j, {"demand": mass}) for j, mass in demand.items())
+    graph.add_weighted_edges_from(
+        (i, size + j, weights[size * i + j]) for i in supply for j in demand
+    )
+    optimum, flows = nx.network_simplex(graph)
+    plan = np.zeros_like(costs)
+    for i in supply:
+        for destination, mass in flows[i].items():
+            plan[i, destination - size] = mass / total
+    return plan, optimum / (total * cost_scale)
 
 
 def _paired_costs(model, node):
@@ -67,65 +71,44 @@ def _joint_from_kernels(model, kernels):
 
 
 def _perfect_graph(model):
-    parents = model.parents
-    families = [(*past, node) for node, past in enumerate(parents)]
-    indices = []
-    size = 0
-    for family in families:
-        cells = 4**len(family)
-        indices.append(np.arange(size, size + cells).reshape((4,) * len(family)))
-        size += cells
+    """Eliminate nodes in reverse order using the perfect-DAG backward recurrence."""
+    families = [(*parents, node) for node, parents in enumerate(model.parents)]
+    costs = [
+        np.broadcast_to(_paired_costs(model, node), (4,) * len(family)).copy()
+        for node, family in enumerate(families)
+    ]
+    kernels = [np.empty_like(cost) for cost in costs]
+    optimum = 0.0
+    for node in reversed(range(model.width)):
+        parents = model.parents[node]
+        remaining = np.empty((4,) * len(parents))
+        for context in np.ndindex(remaining.shape):
+            endpoints = np.array(_binary_endpoints(*_conditional_marginals(model, node, context)))
+            values = endpoints @ costs[node][context]
+            choice = values.argmin()
+            kernels[node][context] = endpoints[choice]
+            remaining[context] = values[choice]
 
-    rows, targets = [], []
-    objective = np.empty(size)
-    fixed_marginals = []
-    for node, past in enumerate(parents):
-        node_marginals = {}
-        objective[indices[node]] = _paired_costs(model, node)
-        for context in np.ndindex((4,) * len(past)):
-            entries = indices[node][context]
-            equation = np.zeros(size)
-            equation[entries] = 1
-            if past:
-                proximal = past[-1]
-                previous = indices[proximal]
-                positions = tuple(families[proximal].index(i) for i in past)
-                for previous_context in np.ndindex(previous.shape):
-                    if tuple(previous_context[i] for i in positions) == context:
-                        equation[previous[previous_context]] -= 1
-            rows.append(equation)
-            targets.append(0 if past else 1)
-
-            distributions = _conditional_marginals(model, node, context)
-            node_marginals[context] = distributions
-            for side, law in enumerate(distributions):
-                for bit in (0, 1):
-                    equation = np.zeros(size)
-                    equation[entries] = [int(z[side] == bit) - law[bit] for z in PAIRS]
-                    rows.append(equation)
-                    targets.append(0)
-        fixed_marginals.append(node_marginals)
-
-    optimum = _solve(objective, rows, np.array(targets))
-    kernels = []
-    for node, past in enumerate(parents):
-        kernel = np.empty(indices[node].shape)
-        for context, (left, right) in fixed_marginals[node].items():
-            weights = optimum.x[indices[node][context]]
-            mass = weights.sum()
-            kernel[context] = weights / mass if mass > 0 else np.outer(left, right).ravel()
-        kernels.append(kernel)
-
-    return _joint_from_kernels(model, kernels), float(optimum.fun)
+        if parents:
+            # A clique of parents fits into the family of the last parent in node order.
+            proximal = parents[-1]
+            shape = tuple(4 if axis in parents else 1 for axis in families[proximal])
+            costs[proximal] += remaining.reshape(shape)
+        else:
+            optimum += float(remaining)
+    return _joint_from_kernels(model, kernels), optimum
 
 
 def _binary_endpoints(left, right):
     # Each endpoint has at least one exact zero, including when a marginal is deterministic.
     x0, x1 = left
     y0, y1 = right
+    # Use the smaller operands when subtracting complementary probabilities.
+    lower = x0 - y1 if max(x0, y1) <= max(x1, y0) else y0 - x1
+    upper = x0 - y0 if max(x0, y0) <= max(x1, y1) else y1 - x1
     return (
-        (max(0.0, x0 - y1), min(x0, y1), min(x1, y0), max(0.0, y1 - x0)),
-        (min(x0, y0), max(0.0, x0 - y0), max(0.0, y0 - x0), min(x1, y1)),
+        (max(0.0, lower), min(x0, y1), min(x1, y0), max(0.0, -lower)),
+        (min(x0, y0), max(0.0, upper), max(0.0, -upper), min(x1, y1)),
     )
 
 

@@ -3,8 +3,8 @@ import json
 import math
 import platform
 
+import networkx as nx
 import numpy as np
-import scipy
 
 from .audit import audit_plan
 from .model import AUDIT_TOLERANCE, Model, probability_array
@@ -52,7 +52,7 @@ def _manifest(payload):
         "input_sha256": _digest(payload),
         "python": platform.python_version(),
         "numpy": np.__version__,
-        "scipy": scipy.__version__,
+        "networkx": nx.__version__,
     }
 
 
@@ -85,7 +85,21 @@ def _same_evidence(expected, claimed):
     return type(expected) is type(claimed) and expected == claimed
 
 
-def _verify_comparison(model, saved):
+def _same_audit(audit, claimed, legacy):
+    if legacy and isinstance(claimed, dict) and isinstance(claimed.get("failures"), list):
+        recorded = claimed["failures"]
+        if len(recorded) == len(audit["failures"]) and all(isinstance(failure, dict) for failure in recorded):
+            # Legacy findings predate the per-state marginal diagnostics.
+            state_diagnostics = {"missing_states", "unexpected_states", "misweighted_states"}
+            audit = {**audit, "failures": [
+                {key: value for key, value in finding.items()
+                 if key not in state_diagnostics or key in saved}
+                for finding, saved in zip(audit["failures"], recorded)
+            ]}
+    return _same_evidence(audit, claimed)
+
+
+def _verify_comparison(model, saved, legacy):
     reference = compare(model)
     matrices = cost_matrices(model)
     result = {"states": list(model.states)}
@@ -110,7 +124,7 @@ def _verify_comparison(model, saved):
                 not costs_match(model, value, recorded[node]) for node, value in by_node.items()
             ):
                 raise ValueError(f"The saved {name} cost breakdown does not match its plan.")
-        if not _same_evidence(audit, claim.get("audit")):
+        if not _same_audit(audit, claim.get("audit"), legacy):
             raise ValueError(f"The saved {name} audit does not match its plan.")
         result[name] = {"plan": plan.tolist(), "cost": cost, "cost_by_node": by_node, "audit": audit}
 
@@ -128,7 +142,9 @@ def verify_run(document):
     manifest = document.get("manifest")
     if not isinstance(manifest, dict) or manifest.get("input_sha256") != _digest(payload):
         raise ValueError("The run's input checksum does not match its model and operation.")
-    versions = ("python", "numpy", "scipy")
+    solver_library = "networkx" if "networkx" in manifest else "scipy"
+    legacy = solver_library == "scipy"
+    versions = ("python", "numpy", solver_library)
     if any(not isinstance(manifest.get(name), str) or not 0 < len(manifest[name]) <= 80 for name in versions):
         raise ValueError("The run is missing its recorded software versions.")
 
@@ -137,11 +153,11 @@ def verify_run(document):
     if not isinstance(saved, dict) or saved.get("states") != states:
         raise ValueError("The saved state order does not match the model.")
     if payload["operation"] == "compare":
-        result = _verify_comparison(model, saved)
+        result = _verify_comparison(model, saved, legacy)
     else:
         plan = payload["plan"]
         audit = audit_plan(model, plan)
-        if not _same_evidence(plan, saved.get("plan")) or not _same_evidence(audit, saved.get("audit")):
+        if not _same_evidence(plan, saved.get("plan")) or not _same_audit(audit, saved.get("audit"), legacy):
             raise ValueError("The saved audit does not match the supplied plan.")
         result = {"states": states, "plan": plan, "audit": audit}
 

@@ -105,7 +105,7 @@ class Model:
                     kernels[i][tuple(state[parent] for parent in past) + (state[i],)]
                     for i, past in enumerate(parents)
                 ]))
-                if not np.isclose(reconstructed, law[state], rtol=1e-8, atol=INPUT_TOLERANCE):
+                if not np.isclose(reconstructed, law[state], rtol=INPUT_TOLERANCE, atol=0):
                     raise ValueError(f"{side} is incompatible with the supplied DAG")
             vector.setflags(write=False)
             distributions.append(vector)
