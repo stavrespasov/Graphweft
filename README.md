@@ -129,8 +129,21 @@ The audit checks joint marginals, prescribed conditional marginals, and the depe
 
 GraphWeft focuses on inspecting graph-specific plans. Existing implementations of time-adapted transport provide related numerical baselines. [AOTNumerics](https://github.com/stephaneckstein/aotnumerics) [PNOT](https://github.com/justinhou95/NestedOT)
 
+### Check optima with an independent solver
+
+```sh
+python -m pip install -e '.[test]'
+python -m unittest discover -s tests -p test_reference_transport.py -v
+```
+
+The test-only reference uses the full coupling matrix as its decision variables. A linear program checks ordinary OT. A mixed-integer program checks graph-bicausal OT by enforcing the prescribed marginals at each paired history. Where histories share a paired parent context, a single binary variable selects a common zero cell of their `2 × 2` kernels. Their fixed marginals then determine the same kernel. An optimum exists at an endpoint in each binary kernel's coupling interval, so the reference can make this restriction while preserving the optimum.
+
+These checks cover 128 seeded cases across all 64 four-node edge patterns in a fixed node order, plus six examples. Generated cases include parent-dependent laws, structural zeros, and asymmetric costs. The reference uses floating-point solvers. The separate rare-state regressions use analytic optima for masses down to `1e-100`.
+
+Run the full suite with the same test dependencies.
+
 ```sh
 python -m unittest discover -s tests -v
 ```
 
-The tests check the cost gaps, the shared-coin counterexample, empty-graph decomposition, and agreement with ordinary OT for a single node. They cover all 64 four-node graphs in a fixed node order on a product-law fixture, compare the collider solver against independent enumeration, and cover rare-state chains with masses down to `1e-100`. Edge comparison tests check that adding a parent preserves the entire cost matrix and that both resulting runs can be verified.
+The full suite also checks the shared-coin counterexample, empty-graph decomposition, single-node agreement with ordinary OT, and the collider solver against independent enumeration. Edge comparison tests check that adding a parent preserves the entire cost matrix and that both resulting runs can be verified.
