@@ -16,12 +16,31 @@ def compare_added_edge(specification, parent, child):
     parent_index, child_index = model.nodes.index(parent), model.nodes.index(child)
     if parent_index >= child_index:
         raise ValueError("The parent must appear before the child in the model's node order.")
-    old_parents = model.parents[child_index]
-    if parent_index in old_parents:
+    if parent_index in model.parents[child_index]:
         raise ValueError("The model already contains that edge.")
 
     original = create_run({"operation": "compare", "model": specification})
+    return {"original": original, **_compare_edge(model, original, parent_index, child_index)}
+
+
+def scan_added_edges(specification):
+    """Rank every missing forward edge, each added on its own to the original graph."""
+    model = Model.from_dict(specification)
+    original = create_run({"operation": "compare", "model": specification})
+    studies = [
+        _compare_edge(model, original, parent, child)
+        for child, parents in enumerate(model.parents)
+        for parent in range(child)
+        if parent not in parents
+    ]
+    studies.sort(key=lambda study: study["cost_decrease"], reverse=True)
+    return {"original": original, "edges": studies}
+
+
+def _compare_edge(model, original, parent_index, child_index):
+    parent, child = model.nodes[parent_index], model.nodes[child_index]
     canonical = original["input"]["model"]
+    old_parents = model.parents[child_index]
     new_parents = sorted((*old_parents, parent_index))
     expanded_specification = {
         **canonical,
@@ -43,13 +62,14 @@ def compare_added_edge(specification, parent, child):
     after = expanded["result"]
     if not costs_match(model, before["ordinary"]["cost"], after["ordinary"]["cost"]):
         raise RuntimeError("Adding the edge changed the ordinary optimum despite fixed laws and costs")
-    decrease = before["constrained"]["cost"] - after["constrained"]["cost"]
-    if decrease < 0 and not costs_match(model, before["constrained"]["cost"], after["constrained"]["cost"]):
+    before_cost = before["constrained"]["cost"]
+    after_cost = after["constrained"]["cost"]
+    decrease = 0.0 if costs_match(model, before_cost, after_cost) else before_cost - after_cost
+    if decrease < 0:
         raise RuntimeError("Adding the edge increased the constrained optimum despite fixed laws and costs")
     return {
         "edge": [parent, child],
-        "original": original,
         "expanded": expanded,
-        "cost_decrease": max(0.0, decrease),
+        "cost_decrease": decrease,
         "original_graph_audit": audit_plan(model, after["constrained"]["plan"]),
     }

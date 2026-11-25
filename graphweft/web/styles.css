@@ -89,7 +89,12 @@ table { border-collapse: collapse; width: 100%; }
 .edge-form { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem; margin: .7rem 0; }
 .edge-form .field { margin: 0; flex: 0 1 17rem; }
 .edge-form button { width: auto; }
+.edge-form button[type="button"], .edge-ranking button { background: var(--surface); color: var(--blue-dark); }
+.edge-form button[type="button"]:hover:not(:disabled), .edge-ranking button:hover { background: #e4ecec; }
 .edge-status.error { color: var(--red); }
+.edge-ranking button { max-width: 100%; overflow-wrap: anywhere; text-align: left; }
+.edge-ranking button[aria-pressed="true"] { background: var(--blue); color: white; }
+#edge-heading { margin-top: 1rem; overflow-wrap: anywhere; }
 .edge-costs { display: flex; flex-wrap: wrap; gap: .5rem; margin: .75rem 0; }
 .edge-costs div { flex: 1 1 9rem; padding: .5rem .65rem; border: 1px solid var(--line); }
 .edge-costs dt { font-size: .78rem; color: var(--muted); }

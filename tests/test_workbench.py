@@ -107,6 +107,19 @@ class WorkbenchTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(payload)["input"]["model"]["parents"]["B"], ["A"])
 
+    def test_edge_scan_returns_ranked_plans_that_can_be_replayed(self):
+        model = json.loads((EXAMPLES / "four_node_collider.json").read_text())
+        headers = {"Content-Type": "application/json"}
+        status, _, payload = self.request("POST", "/api/edge-scan", json.dumps({"model": model}), headers)
+        self.assertEqual(status, 200)
+        scan = json.loads(payload)
+        self.assertEqual([study["edge"] for study in scan["edges"]], [["A", "C"], ["A", "B"]])
+        best = scan["edges"][0]
+        self.assertEqual(best["original_graph_audit"]["failures"][0]["node"], "C")
+        status, _, payload = self.request("POST", "/api/replay", json.dumps(best["expanded"]), headers)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(payload)["result"]["constrained"]["cost"], 0.25)
+
     def test_run_can_be_saved_and_replayed(self):
         model = json.loads((EXAMPLES / "binary_chain.json").read_text())
         headers = {"Content-Type": "application/json"}

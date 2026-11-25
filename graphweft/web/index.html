@@ -78,9 +78,20 @@
             <form id="edge-form" class="edge-form">
               <label class="field">Edge to add <select id="edge-choice"></select></label>
               <button type="submit" id="compare-edge">Compare edge</button>
+              <button type="button" id="scan-edges">Compare all edges</button>
             </form>
             <p id="edge-status" class="edge-status" role="status"></p>
+            <div id="edge-ranking" class="cost-breakdown edge-ranking" hidden>
+              <table aria-label="Added edges ranked by cost decrease">
+                <thead><tr>
+                  <th scope="col">Added edge</th><th scope="col">Constrained cost</th>
+                  <th scope="col" aria-sort="descending">Cost decrease</th>
+                </tr></thead>
+                <tbody id="edge-rows"></tbody>
+              </table>
+            </div>
             <div id="edge-result" hidden>
+              <h3 id="edge-heading" tabindex="-1"></h3>
               <dl id="edge-costs" class="edge-costs"></dl>
               <div class="audit-options">
                 <button type="button" id="inspect-edge">Inspect plan on original graph</button>

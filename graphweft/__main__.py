@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 from .audit import audit_plan
-from .edge_study import compare_added_edge
+from .edge_study import compare_added_edge, scan_added_edges
 from .experiments import MAX_RUN_BYTES, verify_run
 from .model import Model
 from .transport import compare
@@ -46,6 +46,7 @@ def main(argv=None):
     for name, help_text in (
         ("compare", "solve ordinary and graph-bicausal transport"),
         ("compare-edge", "compare transport before and after adding a forward edge"),
+        ("scan-edges", "rank all missing forward edges by their effect on transport cost"),
         ("audit", "test a supplied coupling against the graph"),
     ):
         subparser = commands.add_parser(name, help=help_text)
@@ -55,7 +56,7 @@ def main(argv=None):
         if name == "compare-edge":
             subparser.add_argument("parent", help="node at the start of the new edge")
             subparser.add_argument("child", help="node at the end of the new edge")
-        subparser.add_argument("--summary", action="store_true", help="show costs and the first violation")
+        subparser.add_argument("--summary", action="store_true", help="show costs and audit summaries")
 
     args = parser.parse_args(argv)
     try:
@@ -86,6 +87,25 @@ def main(argv=None):
                     "expanded_constrained_cost": after["constrained"]["cost"],
                     "cost_decrease": result["cost_decrease"],
                     "original_graph_audit": summarize(result["original_graph_audit"]),
+                }
+            print(json.dumps(result, indent=2, allow_nan=False))
+            return 0
+        if args.command == "scan-edges":
+            result = scan_added_edges(specification)
+            if args.summary:
+                original = result["original"]["result"]
+                result = {
+                    "ordinary_cost": original["ordinary"]["cost"],
+                    "original_constrained_cost": original["constrained"]["cost"],
+                    "edges": [
+                        {
+                            "edge": study["edge"],
+                            "expanded_constrained_cost": study["expanded"]["result"]["constrained"]["cost"],
+                            "cost_decrease": study["cost_decrease"],
+                            "original_graph_audit_passed": study["original_graph_audit"]["admissible"],
+                        }
+                        for study in result["edges"]
+                    ],
                 }
             print(json.dumps(result, indent=2, allow_nan=False))
             return 0

@@ -14,8 +14,11 @@ const auditOptions = byId("audit-options");
 const edgeStudy = byId("edge-study");
 const edgeChoice = byId("edge-choice");
 const edgeButton = byId("compare-edge");
+const scanButton = byId("scan-edges");
 const edgeStatus = byId("edge-status");
 const edgeResult = byId("edge-result");
+const edgeRanking = byId("edge-ranking");
+const edgeRows = byId("edge-rows");
 const labels = {
   ordinary: "Ordinary OT",
   constrained: "Graph-bicausal OT",
@@ -269,6 +272,8 @@ function renderResult(data, model, mode) {
 
 function clearResult() {
   clearEdgeResult();
+  edgeRanking.hidden = true;
+  edgeRows.replaceChildren();
   edgeStudy.hidden = true;
   edgeStudy.open = false;
   completedRun = undefined;
@@ -306,9 +311,11 @@ function clearEdgeResult() {
   edgeRequest = undefined;
   expandedRun = undefined;
   edgeButton.disabled = false;
+  scanButton.disabled = false;
   edgeResult.hidden = true;
   edgeStatus.textContent = "";
   edgeStatus.classList.remove("error");
+  edgeRows.querySelector('[aria-pressed="true"]')?.setAttribute("aria-pressed", "false");
   if (reports.expanded) {
     delete reports.expanded;
     auditOptions.querySelector('[data-plan="expanded"]').remove();
@@ -316,37 +323,75 @@ function clearEdgeResult() {
   }
 }
 
-async function compareEdge() {
+function renderEdgeResult(study, before) {
+  const after = study.expanded.result.constrained.cost;
+  byId("edge-heading").textContent = study.edge.join(" → ");
+  byId("edge-costs").replaceChildren(...[
+    ["Original constrained cost", before],
+    ["Expanded constrained cost", after],
+    ["Cost decrease", study.cost_decrease],
+  ].map(([label, value]) => {
+    const item = element("div");
+    item.append(element("dt", label), element("dd", format(value)));
+    return item;
+  }));
+  expandedRun = study.expanded;
+  reports.expanded = study.original_graph_audit;
+  const button = auditButton("expanded");
+  button.setAttribute("aria-pressed", "false");
+  auditOptions.append(button);
+  const auditSummary = reports.expanded.admissible
+    ? "The expanded plan also passes the original graph audit."
+    : "The expanded plan fails the original graph audit.";
+  edgeStatus.textContent = study.cost_decrease === 0
+    ? `Both graphs achieve the same cost within solver tolerance. ${auditSummary}`
+    : auditSummary;
+  const selectedEdge = JSON.stringify(study.edge);
+  for (const choice of edgeRows.querySelectorAll("button")) {
+    choice.setAttribute("aria-pressed", String(choice.dataset.edge === selectedEdge));
+  }
+  edgeResult.hidden = false;
+}
+
+function renderEdgeRanking(scan) {
+  const before = scan.original.result.constrained.cost;
+  edgeRows.replaceChildren(...scan.edges.map((study) => {
+    const row = element("tr");
+    const header = element("th");
+    header.scope = "row";
+    const choice = element("button", study.edge.join(" → "));
+    choice.type = "button";
+    choice.dataset.edge = JSON.stringify(study.edge);
+    choice.setAttribute("aria-controls", "edge-result");
+    choice.setAttribute("aria-pressed", "false");
+    choice.addEventListener("click", () => {
+      clearEdgeResult();
+      edgeChoice.value = choice.dataset.edge;
+      renderEdgeResult(study, before);
+      byId("edge-heading").focus();
+    });
+    header.append(choice);
+    row.append(header, element("td", format(study.expanded.result.constrained.cost)),
+      element("td", format(study.cost_decrease)));
+    return row;
+  }));
+  edgeStatus.textContent = scan.edges.length
+    ? `Original constrained cost ${format(before)} · Select an edge to inspect its plan.`
+    : "The graph already contains every forward edge.";
+  edgeRanking.hidden = scan.edges.length === 0;
+}
+
+async function requestEdge(path, parameters, message, render) {
   clearEdgeResult();
-  const model = completedRun.input.model;
-  const [parent, child] = JSON.parse(edgeChoice.value);
+  const payload = { model: completedRun.input.model, ...parameters };
   const active = new AbortController();
   edgeRequest = active;
   edgeButton.disabled = true;
-  edgeStatus.textContent = "Comparing graphs…";
+  scanButton.disabled = true;
+  edgeStatus.textContent = message;
   try {
-    const study = await postRun("/api/edge", JSON.stringify({ model, parent, child }), active.signal);
-    if (edgeRequest !== active) return;
-    const before = study.original.result.constrained.cost;
-    const after = study.expanded.result.constrained.cost;
-    byId("edge-costs").replaceChildren(...[
-      ["Original constrained cost", before],
-      ["Expanded constrained cost", after],
-      ["Cost decrease", study.cost_decrease],
-    ].map(([label, value]) => {
-      const item = element("div");
-      item.append(element("dt", label), element("dd", format(value)));
-      return item;
-    }));
-    expandedRun = study.expanded;
-    reports.expanded = study.original_graph_audit;
-    const button = auditButton("expanded");
-    button.setAttribute("aria-pressed", "false");
-    auditOptions.append(button);
-    edgeStatus.textContent = reports.expanded.admissible
-      ? "The expanded plan also passes the original graph audit."
-      : "The expanded plan fails the original graph audit.";
-    edgeResult.hidden = false;
+    const result = await postRun(path, JSON.stringify(payload), active.signal);
+    if (edgeRequest === active) render(result);
   } catch (error) {
     if (edgeRequest !== active) return;
     edgeStatus.textContent = error.message || "GraphWeft could not compare the graphs.";
@@ -355,6 +400,7 @@ async function compareEdge() {
     if (edgeRequest === active) {
       edgeRequest = undefined;
       edgeButton.disabled = false;
+      scanButton.disabled = false;
     }
   }
 }
@@ -443,7 +489,17 @@ saveButton.addEventListener("click", () => downloadRun(completedRun, status));
 edgeChoice.addEventListener("change", clearEdgeResult);
 byId("edge-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  if (completedRun && edgeChoice.value) void compareEdge();
+  if (!completedRun || !edgeChoice.value) return;
+  const [parent, child] = JSON.parse(edgeChoice.value);
+  void requestEdge("/api/edge", { parent, child }, "Comparing graphs…", (study) => {
+    renderEdgeResult(study, study.original.result.constrained.cost);
+  });
+});
+scanButton.addEventListener("click", () => {
+  if (!completedRun) return;
+  edgeRanking.hidden = true;
+  edgeRows.replaceChildren();
+  void requestEdge("/api/edge-scan", {}, "Comparing all missing forward edges…", renderEdgeRanking);
 });
 byId("inspect-edge").addEventListener("click", () => {
   inspect("expanded");

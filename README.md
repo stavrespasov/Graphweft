@@ -94,6 +94,21 @@ Choose **Four-node collider** to see the effect of an edge upstream of another n
 python -m graphweft compare-edge examples/four_node_collider.json A C --summary
 ```
 
+### Rank all missing edges
+
+In **Compare an added edge**, select **Compare all edges**. GraphWeft adds each candidate to the original graph on its own and ranks the candidates by constrained cost decrease. Select an edge to inspect its plan against the original graph or save the expanded run. A decrease within solver tolerance is reported as zero. Several plans can attain the same cost, and the audit describes the selected plan.
+
+```sh
+python -m graphweft scan-edges examples/four_node_collider.json --summary
+```
+
+| Added edge | Constrained cost | Decrease from 0.50 |
+|---|---:|---:|
+| A → C | 0.25 | 0.25 |
+| A → B | 0.50 | 0 |
+
+Omit `--summary` for the original run and each candidate's expanded run and cross-graph audit. A graph that already contains every forward edge returns an empty list.
+
 ## Method and verification
 
 The ordinary solver uses a full-coupling LP in SciPy/HiGHS. For perfect DAGs, where every node's parents form a clique, the constrained solver uses one LP over the paired state at each node and its parents. Linear constraints match each input’s local marginals and enforce consistency between overlapping tables. The conditional kernels reconstruct the plan. [Kernel characterization and graph-separable costs, Propositions 4.7 and 5.2–5.3](https://arxiv.org/html/2608.13716v1)
