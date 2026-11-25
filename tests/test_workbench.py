@@ -43,7 +43,8 @@ class WorkbenchTests(unittest.TestCase):
         status, _, payload = self.request("GET", "/api/examples")
         self.assertEqual(status, 200)
         examples = {entry["id"]: entry for entry in json.loads(payload)}
-        for key, filename in (("fork", "binary_fork.json"), ("chain", "binary_chain.json"),
+        for key, filename in (("fork", "binary_fork.json"), ("weighted-fork", "parent_weighted_fork.json"),
+                              ("chain", "binary_chain.json"),
                               ("shared-coin", "shared_coin_model.json")):
             self.assertEqual(examples[key]["model"], json.loads((EXAMPLES / filename).read_text()))
         self.assertEqual(examples["shared-coin"]["plan"], json.loads((EXAMPLES / "shared_coin_plan.json").read_text()))

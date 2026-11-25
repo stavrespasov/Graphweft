@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from math import isfinite
 
 import numpy as np
 
@@ -11,7 +12,7 @@ def marginal(tensor, nodes):
     return tensor.sum(axis=omitted)
 
 
-def probability_array(raw, shape, name):
+def nonnegative_array(raw, shape, name):
     try:
         array = np.asarray(raw)
         if array.shape != shape or array.dtype.kind not in "iuf":
@@ -19,9 +20,22 @@ def probability_array(raw, shape, name):
         array = array.astype(np.float64)
     except (TypeError, ValueError, OverflowError):
         raise ValueError(f"{name} must be a numeric array with shape {shape}") from None
-    if not np.all(np.isfinite(array)) or np.any(array < 0) or np.any(array > 1 + INPUT_TOLERANCE):
+    if not np.all(np.isfinite(array)) or np.any(array < 0):
+        raise ValueError(f"{name} must have finite, nonnegative entries")
+    return array
+
+
+def probability_array(raw, shape, name):
+    array = nonnegative_array(raw, shape, name)
+    if np.any(array > 1 + INPUT_TOLERANCE):
         raise ValueError(f"{name} must have finite, nonnegative entries bounded by one")
     return array
+
+
+def paired_tensor(matrix, width):
+    # Each paired axis is ordered (0,0), (0,1), (1,0), (1,1).
+    interleaved = tuple(axis for i in range(width) for axis in (i, width + i))
+    return matrix.reshape((2,) * (2 * width)).transpose(interleaved).reshape((4,) * width)
 
 
 def local_kernels(law, parents):
@@ -41,6 +55,8 @@ class Model:
     source: np.ndarray
     target: np.ndarray
     laws: tuple
+    cost_factors: dict = field(default_factory=dict)
+    cost_scale: float = 1.0
 
     @property
     def width(self):
@@ -94,4 +110,17 @@ class Model:
             vector.setflags(write=False)
             distributions.append(vector)
             laws.append(kernels)
-        return cls(tuple(nodes), tuple(parents), *distributions, tuple(laws))
+        raw_costs = specification.get("cost_factors", {})
+        if not isinstance(raw_costs, dict) or not raw_costs.keys() <= node_index.keys():
+            raise ValueError("Cost factors must be tables keyed by model node names.")
+        costs = {}
+        for node, raw in raw_costs.items():
+            size = 2 ** (len(parents[node_index[node]]) + 1)
+            table = nonnegative_array(raw, (size, size), f"Cost factor for {node}")
+            table.setflags(write=False)
+            costs[node] = table
+
+        scale = sum(float(costs[node].max()) if node in costs else 1.0 for node in nodes) if costs else 1.0
+        if not isfinite(scale):
+            raise ValueError("The sum of the maximum local costs must be finite.")
+        return cls(tuple(nodes), tuple(parents), *distributions, tuple(laws), costs, scale or 1.0)

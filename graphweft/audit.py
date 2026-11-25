@@ -1,6 +1,6 @@
 import numpy as np
 
-from .model import AUDIT_TOLERANCE, marginal, probability_array
+from .model import AUDIT_TOLERANCE, marginal, paired_tensor, probability_array
 
 PAIRS = ((0, 0), (0, 1), (1, 0), (1, 1))
 
@@ -23,9 +23,7 @@ def audit_plan(model, candidate):
         if error > AUDIT_TOLERANCE:
             failures.append({"kind": "joint_marginal", "side": side, "max_absolute_error": error})
 
-    # Interleave X and Y axes so each coordinate represents (X_i, Y_i).
-    interleaved = tuple(axis for i in range(width) for axis in (i, width + i))
-    paired = plan.reshape((2,) * (2 * width)).transpose(interleaved).reshape((4,) * width)
+    paired = paired_tensor(plan, width)
     for node, parents in enumerate(model.parents):
         family = marginal(paired, (*parents, node))
         history = marginal(paired, tuple(range(node + 1)))

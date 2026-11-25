@@ -57,11 +57,23 @@ This example returns exit code `1` for an inadmissible plan and prints the faile
 
 Start from [the chain fixture](examples/binary_chain.json). Define one to four binary nodes in topological order and list the parents of each node. The source and target vectors assign mass to lexicographically ordered bit strings. For two nodes, the order is `00`, `01`, `10`, `11`. Both probability laws must factor according to the graph.
 
-The solver uses Hamming cost on **perfect DAGs**, where the parents of every node form a clique. The auditor also accepts other DAGs within the same size limit. An audit input is a JSON coupling matrix whose rows follow source-state order and whose columns follow target-state order.
+The solver accepts **perfect DAGs**, where the parents of every node form a clique. The auditor also accepts other DAGs within the same size limit. An audit input is a JSON coupling matrix whose rows follow source-state order and whose columns follow target-state order.
+
+### Specify parent-dependent costs
+
+By default each node costs one unit when its source and target bits differ. To override that cost, supply a `cost_factors` object keyed by node name. Each entry is a square table for the node and its parents. A local bit string contains the parent bits in model order, followed by the node's bit. Rows enumerate those strings for the source and columns enumerate them for the target, both in lexicographic order. For one parent the order is `00`, `01`, `10`, `11`. Entries must be finite and nonnegative.
+
+Choose **Parent-weighted fork** in the workbench or run the same fixture in the CLI.
+
+```sh
+python -m graphweft compare examples/parent_weighted_fork.json --summary
+```
+
+In the [parent-weighted fork](examples/parent_weighted_fork.json), a mismatch at C costs two units when source A is zero and four when source A is one. Ordinary OT can match C and pay a total of **1.0**. Graph-bicausal OT costs **2.5**, with **1.5** from C. The **Cost by node** table shows each term in the totals. Saved runs include the cost tables and verify them along with the resulting costs.
 
 ## Method and verification
 
-The ordinary solver uses a full-coupling LP. The graph solver uses one LP over the paired state at each node and its parents. Linear constraints match each input’s local marginals and enforce consistency between overlapping tables. The resulting conditional kernels reconstruct the plan. The audit checks joint marginals, prescribed conditional marginals, and the dependence of each paired state on earlier pairs. Both solvers use SciPy/HiGHS. The full audit reports an absolute tolerance of `1e-8`. [Kernel characterization and perfect-DAG property, Propositions 4.7 and 5.2](https://arxiv.org/html/2608.13716v1)
+The ordinary solver uses a full-coupling LP. The graph solver uses one LP over the paired state at each node and its parents. Linear constraints match each input’s local marginals and enforce consistency between overlapping tables. The resulting conditional kernels reconstruct the plan. The audit checks joint marginals, prescribed conditional marginals, and the dependence of each paired state on earlier pairs. Both solvers use SciPy/HiGHS. Custom objectives are scaled by the sum of the maximum local costs when that sum is positive. Costs are displayed in their original units. Verification checks probability audits at an absolute tolerance of `1e-8` and custom objective values at that tolerance in solver units. [Kernel characterization and graph-separable costs, Propositions 4.7 and 5.2–5.3](https://arxiv.org/html/2608.13716v1)
 
 GraphWeft focuses on inspecting graph-specific plans. Existing implementations of time-adapted transport provide related numerical baselines. [AOTNumerics](https://github.com/stephaneckstein/aotnumerics) [PNOT](https://github.com/justinhou95/NestedOT)
 

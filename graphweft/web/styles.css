@@ -79,6 +79,11 @@ table { border-collapse: collapse; width: 100%; }
 .mass-3 { background: #9ebfce; }
 .mass-4 { color: #fff; background: #416e83; }
 .mass-5 { color: #fff; background: var(--blue-dark); }
+.cost-breakdown { margin-top: .9rem; }
+.cost-breakdown table { table-layout: fixed; font-size: .8rem; }
+.cost-breakdown th, .cost-breakdown td { padding: .45rem .35rem; border-bottom: 1px solid var(--line); text-align: right; overflow-wrap: anywhere; }
+.cost-breakdown th:first-child { text-align: left; }
+.cost-breakdown td { font-family: var(--mono); }
 .audit-options { display: flex; flex-wrap: wrap; gap: .3rem; }
 .audit-options button { background: var(--surface); color: var(--blue-dark); }
 .audit-options button:hover { background: #e4ecec; }

@@ -111,7 +111,7 @@ function renderMatrix(states, plan, peak, title) {
   return wrapper;
 }
 
-function renderPlan(name, entry, states, peak) {
+function renderPlan(name, entry, states, peak, costLabel) {
   const title = labels[name];
   const card = element("section", undefined, "plan");
   const header = element("div", undefined, "plan-header");
@@ -120,7 +120,7 @@ function renderPlan(name, entry, states, peak) {
   badge.dataset.admissible = String(entry.audit.admissible);
   if (entry.cost !== undefined) {
     const cost = element("p", undefined, "cost");
-    cost.append(element("span", format(entry.cost), "cost-value"), element("span", "Hamming cost"));
+    cost.append(element("span", format(entry.cost), "cost-value"), element("span", costLabel));
     header.append(heading, cost, badge);
   } else {
     header.append(heading, badge);
@@ -217,10 +217,27 @@ function renderResult(data, model, mode) {
   const entries = mode === "compare"
     ? [["ordinary", data.ordinary], ["constrained", data.constrained]]
     : [["candidate", data]];
+  const hasCustomCosts = Object.keys(model.cost_factors ?? {}).length > 0;
+  const costLabel = hasCustomCosts ? "Expected cost" : "Hamming cost";
   const peak = Math.max(Number.EPSILON, ...entries.flatMap(([, entry]) => entry.plan.flat()));
   byId("gap").hidden = mode !== "compare";
-  if (mode === "compare") byId("gap").textContent = `Cost gap ${format(data.cost_gap)}`;
-  byId("plans").replaceChildren(...entries.map(([name, entry]) => renderPlan(name, entry, data.states, peak)));
+  byId("cost-breakdown").hidden = mode !== "compare";
+  if (mode === "compare") {
+    byId("gap").textContent = `Cost gap ${format(data.cost_gap)}`;
+    byId("cost-breakdown").open = hasCustomCosts;
+    byId("cost-rows").replaceChildren(...model.nodes.map((node) => {
+      const ordinary = data.ordinary.cost_by_node[node];
+      const constrained = data.constrained.cost_by_node[node];
+      const row = element("tr");
+      const heading = element("th", node);
+      heading.scope = "row";
+      row.append(heading, ...[ordinary, constrained, constrained - ordinary].map(
+        (value) => element("td", format(value)),
+      ));
+      return row;
+    }));
+  }
+  byId("plans").replaceChildren(...entries.map(([name, entry]) => renderPlan(name, entry, data.states, peak, costLabel)));
   byId("plans").classList.toggle("single", mode === "audit");
 
   reports = Object.fromEntries(entries.map(([name, entry]) => [name, entry.audit]));

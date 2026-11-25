@@ -36,7 +36,7 @@ def summarize(report):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Compare Hamming transport plans and audit graph-bicausality.")
+    parser = argparse.ArgumentParser(description="Compare graph-separable transport plans and audit graph-bicausality.")
     commands = parser.add_subparsers(dest="command", required=True)
     browser = commands.add_parser("serve", help="open a local browser workbench")
     browser.add_argument("--port", type=int, default=8765, help="loopback port (default: 8765)")
@@ -80,7 +80,10 @@ def main(argv=None):
             if args.summary:
                 for mode in ("ordinary", "constrained"):
                     entry = result[mode]
-                    result[mode] = {"cost": entry["cost"], "audit": summarize(entry["audit"])}
+                    result[mode] = {
+                        "cost": entry["cost"], "cost_by_node": entry["cost_by_node"],
+                        "audit": summarize(entry["audit"]),
+                    }
         print(json.dumps(result, indent=2, allow_nan=False))
         return status
     except (OSError, ValueError, RuntimeError) as error:

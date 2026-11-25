@@ -60,6 +60,16 @@
               <p id="gap" class="gap"></p>
             </header>
             <div id="plans" class="plans"></div>
+            <details id="cost-breakdown" class="cost-breakdown" hidden>
+              <summary>Cost by node</summary>
+              <table aria-label="Expected cost by node">
+                <thead><tr>
+                  <th scope="col">Node</th><th scope="col">Ordinary OT</th>
+                  <th scope="col">Graph-bicausal OT</th><th scope="col">Difference</th>
+                </tr></thead>
+                <tbody id="cost-rows"></tbody>
+              </table>
+            </details>
           </section>
 
           <section class="section audit" aria-labelledby="audit-heading">

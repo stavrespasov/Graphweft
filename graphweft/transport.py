@@ -1,10 +1,10 @@
-from math import prod
+from math import isclose, isfinite, prod
 
 import numpy as np
 from scipy.optimize import linprog
 
 from .audit import PAIRS, audit_plan
-from .model import AUDIT_TOLERANCE
+from .model import AUDIT_TOLERANCE, paired_tensor
 
 _HAMMING_PAIR = np.array([int(x != y) for x, y in PAIRS])
 
@@ -56,7 +56,11 @@ def _graph(model):
     fixed_marginals = []
     for node, past in enumerate(parents):
         node_marginals = {}
-        objective[indices[node]] = _HAMMING_PAIR
+        factor = model.cost_factors.get(model.nodes[node])
+        if factor is None:
+            objective[indices[node]] = _HAMMING_PAIR / model.cost_scale
+        else:
+            objective[indices[node]] = paired_tensor(factor / model.cost_scale, len(past) + 1)
         for context in np.ndindex((4,) * len(past)):
             entries = indices[node][context]
             equation = np.zeros(size)
@@ -112,8 +116,44 @@ def hamming_costs(model):
     return (bits[:, None, :] != bits[None, :, :]).sum(axis=-1)
 
 
+def cost_matrices(model):
+    """Project each cost factor to the full coupling, in solver units."""
+    bits = np.array([list(state) for state in model.states], dtype=int)
+    matrices = []
+    for node, parents in enumerate(model.parents):
+        factor = model.cost_factors.get(model.nodes[node])
+        if factor is None:
+            matrix = bits[:, node, None] != bits[None, :, node]
+        else:
+            family = (*parents, node)
+            weights = 2 ** np.arange(len(family) - 1, -1, -1)
+            states = bits[:, family] @ weights
+            matrix = factor[states[:, None], states[None, :]]
+        matrices.append(matrix / model.cost_scale)
+    return matrices
+
+
+def plan_costs(model, plan, matrices):
+    return {
+        node: float((matrix * plan).sum()) * model.cost_scale
+        for node, matrix in zip(model.nodes, matrices)
+    }
+
+
+def costs_match(model, expected, claimed):
+    if type(claimed) not in (int, float):
+        return False
+    try:
+        return isfinite(expected) and isfinite(claimed) and isclose(
+            expected / model.cost_scale, claimed / model.cost_scale, abs_tol=AUDIT_TOLERANCE, rel_tol=0,
+        )
+    except OverflowError:
+        return False
+
+
 def compare(model):
-    costs = hamming_costs(model)
+    matrices = cost_matrices(model)
+    costs = np.sum(matrices, axis=0)
     constrained = _graph(model)
     ordinary = _ordinary(model, costs)
     result = {"states": list(model.states)}
@@ -121,15 +161,19 @@ def compare(model):
         cost = float((plan * costs).sum())
         if abs(cost - optimum) > AUDIT_TOLERANCE:
             raise RuntimeError(f"Reconstructed {name} witness disagrees with the LP objective")
+        by_node = plan_costs(model, plan, matrices)
+        reported_cost = sum(by_node.values())
+        if not isfinite(reported_cost):
+            raise RuntimeError(f"The reconstructed {name} cost is outside the numeric range")
         audit = audit_plan(model, plan)
         if (name == "constrained" and not audit["admissible"]) or any(
             failure["kind"] == "joint_marginal" for failure in audit["failures"]
         ):
             raise RuntimeError(f"The returned {name} witness failed its feasibility audit")
-        result[name] = {"cost": cost, "plan": plan.tolist(), "audit": audit}
+        result[name] = {"cost": reported_cost, "cost_by_node": by_node, "plan": plan.tolist(), "audit": audit}
 
     gap = result["constrained"]["cost"] - result["ordinary"]["cost"]
-    if gap < -AUDIT_TOLERANCE:
+    if gap / model.cost_scale < -AUDIT_TOLERANCE:
         raise RuntimeError("Constrained optimum undercuts the ordinary optimum")
     result["cost_gap"] = gap
     return result

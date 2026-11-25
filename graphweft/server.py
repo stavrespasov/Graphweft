@@ -18,6 +18,10 @@ _ASSETS = {
 def demo_examples():
     fork_nodes = ["A", "B", "C"]
     fork_edges = {"A": [], "B": ["A"], "C": ["A"]}
+    fork_model = {
+        "nodes": fork_nodes, "parents": fork_edges,
+        "source": [0.5, 0, 0, 0, 0, 0, 0, 0.5], "target": [0.25] * 4 + [0] * 4,
+    }
     shared_coin_plan = [
         [0.0625 if target in (source, source ^ 3) else 0 for target in range(8)]
         for source in range(8)
@@ -25,10 +29,13 @@ def demo_examples():
     return [
         {
             "id": "fork", "label": "Three-node fork", "operation": "compare",
-            "model": {
-                "nodes": fork_nodes, "parents": fork_edges,
-                "source": [0.5, 0, 0, 0, 0, 0, 0, 0.5], "target": [0.25] * 4 + [0] * 4,
-            },
+            "model": fork_model,
+        },
+        {
+            "id": "weighted-fork", "label": "Parent-weighted fork", "operation": "compare",
+            "model": {**fork_model, "cost_factors": {"C": [
+                [0, 2, 0, 2], [2, 0, 2, 0], [0, 4, 0, 4], [4, 0, 4, 0],
+            ]}},
         },
         {
             "id": "chain", "label": "Two-node chain", "operation": "compare",

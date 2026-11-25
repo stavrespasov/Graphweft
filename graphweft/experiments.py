@@ -8,7 +8,7 @@ import scipy
 
 from .audit import audit_plan
 from .model import AUDIT_TOLERANCE, Model, probability_array
-from .transport import compare, hamming_costs
+from .transport import compare, cost_matrices, costs_match, plan_costs
 
 RUN_SCHEMA = "graphweft.run/1"
 MAX_RUN_BYTES = 1024 * 1024
@@ -33,6 +33,8 @@ def _prepare(request):
             "target": [float(value) + 0.0 for value in specification["target"]],
         },
     }
+    if model.cost_factors:
+        payload["model"]["cost_factors"] = {name: (table + 0.0).tolist() for name, table in model.cost_factors.items()}
     if operation == "audit":
         dimension = len(model.source)
         plan = probability_array(request.get("plan"), (dimension, dimension), "coupling")
@@ -85,28 +87,35 @@ def _same_evidence(expected, claimed):
 
 def _verify_comparison(model, saved):
     reference = compare(model)
-    costs = hamming_costs(model)
+    matrices = cost_matrices(model)
     result = {"states": list(model.states)}
     for name in ("ordinary", "constrained"):
         claim = saved.get(name)
         if not isinstance(claim, dict):
             raise ValueError(f"The saved run is missing its {name} plan.")
-        plan = probability_array(claim.get("plan"), costs.shape, f"{name} coupling")
+        plan = probability_array(claim.get("plan"), matrices[0].shape, f"{name} coupling")
         audit = audit_plan(model, plan)
         marginal_failure = any(failure["kind"] == "joint_marginal" for failure in audit["failures"])
         if marginal_failure or (name == "constrained" and not audit["admissible"]):
             raise ValueError(f"The saved {name} plan fails its feasibility checks.")
-        cost = float((plan * costs).sum())
-        if not _same_evidence(cost, claim.get("cost")):
+        by_node = plan_costs(model, plan, matrices)
+        cost = sum(by_node.values())
+        if not costs_match(model, cost, claim.get("cost")):
             raise ValueError(f"The saved {name} cost does not match its plan.")
-        if not _same_evidence(reference[name]["cost"], cost):
+        if not costs_match(model, reference[name]["cost"], cost):
             raise ValueError(f"The saved {name} cost does not match the recomputed optimum.")
+        if "cost_by_node" in claim:
+            recorded = claim["cost_by_node"]
+            if not isinstance(recorded, dict) or recorded.keys() != by_node.keys() or any(
+                not costs_match(model, value, recorded[node]) for node, value in by_node.items()
+            ):
+                raise ValueError(f"The saved {name} cost breakdown does not match its plan.")
         if not _same_evidence(audit, claim.get("audit")):
             raise ValueError(f"The saved {name} audit does not match its plan.")
-        result[name] = {"plan": plan.tolist(), "cost": cost, "audit": audit}
+        result[name] = {"plan": plan.tolist(), "cost": cost, "cost_by_node": by_node, "audit": audit}
 
     gap = result["constrained"]["cost"] - result["ordinary"]["cost"]
-    if not _same_evidence(gap, saved.get("cost_gap")):
+    if not costs_match(model, gap, saved.get("cost_gap")):
         raise ValueError("The saved cost gap does not match the verified costs.")
     result["cost_gap"] = gap
     return result

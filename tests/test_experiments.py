@@ -8,7 +8,7 @@ import numpy as np
 from graphweft.audit import audit_plan
 from graphweft.experiments import RUN_SCHEMA, create_run, verify_run
 from graphweft.model import Model
-from graphweft.transport import hamming_costs
+from graphweft.transport import cost_matrices, hamming_costs, plan_costs
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
@@ -46,6 +46,7 @@ class RunFileTests(unittest.TestCase):
         alternative = next(plan for plan in alternatives if plan != saved["result"]["ordinary"]["plan"])
         saved["result"]["ordinary"]["plan"] = alternative
         saved["result"]["ordinary"]["audit"] = audit_plan(model, alternative)
+        saved["result"]["ordinary"]["cost_by_node"] = plan_costs(model, np.array(alternative), cost_matrices(model))
         verified = verify_run(saved)
         self.assertEqual(verified["result"]["ordinary"]["plan"], alternative)
 
@@ -89,4 +90,24 @@ class RunFileTests(unittest.TestCase):
         self.assertEqual(confirmed["result"]["audit"]["failures"][0]["node"], "C")
         saved["result"]["audit"]["failures"][0]["observed"] = [0.25] * 4
         with self.assertRaisesRegex(ValueError, "saved audit"):
+            verify_run(saved)
+
+    def test_hamming_runs_without_cost_breakdowns_remain_compatible(self):
+        saved = compare_example()
+        del saved["result"]["ordinary"]["cost_by_node"]
+        del saved["result"]["constrained"]["cost_by_node"]
+        verified = verify_run(saved)
+        self.assertEqual(verified["result"]["ordinary"]["cost_by_node"], {"A": 0.5, "B": 0.0})
+
+    def test_custom_costs_bind_the_checksum_and_recomputed_breakdown(self):
+        saved = compare_example("parent_weighted_fork.json")
+        verified = verify_run(json.loads(json.dumps(saved)))
+        self.assertEqual(verified["result"]["cost_gap"], 1.5)
+        self.assertEqual(verified["result"]["constrained"]["cost_by_node"]["C"], 1.5)
+        edited = copy.deepcopy(saved)
+        edited["input"]["model"]["cost_factors"]["C"][0][1] = 4
+        with self.assertRaisesRegex(ValueError, "checksum"):
+            verify_run(edited)
+        saved["result"]["constrained"]["cost_by_node"]["C"] = 0
+        with self.assertRaisesRegex(ValueError, "cost breakdown"):
             verify_run(saved)
