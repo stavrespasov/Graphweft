@@ -3,6 +3,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 
 from .audit import audit_plan
+from .edge_study import compare_added_edge
 from .experiments import MAX_RUN_BYTES, create_run, verify_run
 from .model import Model
 from .transport import compare
@@ -114,7 +115,7 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._allow_local():
             return
-        if self.path not in ("/api/compare", "/api/audit", "/api/run", "/api/replay"):
+        if self.path not in ("/api/compare", "/api/audit", "/api/run", "/api/replay", "/api/edge"):
             self._json(404, {"error": "Operation not found."})
             return
         if self.headers.get_content_type() != "application/json":
@@ -141,6 +142,8 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                 result = verify_run(data)
             elif self.path == "/api/run":
                 result = create_run(data)
+            elif self.path == "/api/edge":
+                result = compare_added_edge(data.get("model"), data.get("parent"), data.get("child"))
             else:
                 model = Model.from_dict(data.get("model"))
                 if self.path == "/api/compare":

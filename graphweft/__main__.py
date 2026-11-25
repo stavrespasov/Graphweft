@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 from .audit import audit_plan
+from .edge_study import compare_added_edge
 from .experiments import MAX_RUN_BYTES, verify_run
 from .model import Model
 from .transport import compare
@@ -44,12 +45,16 @@ def main(argv=None):
     verification.add_argument("file", help="GraphWeft run JSON file")
     for name, help_text in (
         ("compare", "solve ordinary and graph-bicausal transport"),
+        ("compare-edge", "compare transport before and after adding a forward edge"),
         ("audit", "test a supplied coupling against the graph"),
     ):
         subparser = commands.add_parser(name, help=help_text)
         subparser.add_argument("model", help="JSON model file")
         if name == "audit":
             subparser.add_argument("plan", help="JSON coupling matrix")
+        if name == "compare-edge":
+            subparser.add_argument("parent", help="node at the start of the new edge")
+            subparser.add_argument("child", help="node at the end of the new edge")
         subparser.add_argument("--summary", action="store_true", help="show costs and the first violation")
 
     args = parser.parse_args(argv)
@@ -69,7 +74,22 @@ def main(argv=None):
                 result["admissible"] = run["result"]["audit"]["admissible"]
             print(json.dumps(result, indent=2, allow_nan=False))
             return 0
-        model = Model.from_dict(read_json(args.model))
+        specification = read_json(args.model)
+        if args.command == "compare-edge":
+            result = compare_added_edge(specification, args.parent, args.child)
+            if args.summary:
+                before, after = (result[key]["result"] for key in ("original", "expanded"))
+                result = {
+                    "edge": result["edge"],
+                    "ordinary_cost": before["ordinary"]["cost"],
+                    "original_constrained_cost": before["constrained"]["cost"],
+                    "expanded_constrained_cost": after["constrained"]["cost"],
+                    "cost_decrease": result["cost_decrease"],
+                    "original_graph_audit": summarize(result["original_graph_audit"]),
+                }
+            print(json.dumps(result, indent=2, allow_nan=False))
+            return 0
+        model = Model.from_dict(specification)
         status = 0
         if args.command == "audit":
             report = audit_plan(model, read_json(args.plan))

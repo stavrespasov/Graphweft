@@ -84,6 +84,16 @@ table { border-collapse: collapse; width: 100%; }
 .cost-breakdown th, .cost-breakdown td { padding: .45rem .35rem; border-bottom: 1px solid var(--line); text-align: right; overflow-wrap: anywhere; }
 .cost-breakdown th:first-child { text-align: left; }
 .cost-breakdown td { font-family: var(--mono); }
+.edge-study:not([open]) summary { margin-bottom: 0; }
+.edge-study p { color: var(--muted); font-size: .85rem; }
+.edge-form { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem; margin: .7rem 0; }
+.edge-form .field { margin: 0; flex: 0 1 17rem; }
+.edge-form button { width: auto; }
+.edge-status.error { color: var(--red); }
+.edge-costs { display: flex; flex-wrap: wrap; gap: .5rem; margin: .75rem 0; }
+.edge-costs div { flex: 1 1 9rem; padding: .5rem .65rem; border: 1px solid var(--line); }
+.edge-costs dt { font-size: .78rem; color: var(--muted); }
+.edge-costs dd { margin: .2rem 0 0; font: 650 1rem var(--mono); }
 .audit-options { display: flex; flex-wrap: wrap; gap: .3rem; }
 .audit-options button { background: var(--surface); color: var(--blue-dark); }
 .audit-options button:hover { background: #e4ecec; }

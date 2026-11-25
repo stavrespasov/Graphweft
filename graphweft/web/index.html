@@ -72,10 +72,27 @@
             </details>
           </section>
 
+          <details id="edge-study" class="section edge-study" hidden>
+            <summary>Compare an added edge</summary>
+            <p>Keep the source law, target law, and cost fixed while adding an edge to the current result.</p>
+            <form id="edge-form" class="edge-form">
+              <label class="field">Edge to add <select id="edge-choice"></select></label>
+              <button type="submit" id="compare-edge">Compare edge</button>
+            </form>
+            <p id="edge-status" class="edge-status" role="status"></p>
+            <div id="edge-result" hidden>
+              <dl id="edge-costs" class="edge-costs"></dl>
+              <div class="audit-options">
+                <button type="button" id="inspect-edge">Inspect plan on original graph</button>
+                <button type="button" id="save-edge">Save expanded run</button>
+              </div>
+            </div>
+          </details>
+
           <section class="section audit" aria-labelledby="audit-heading">
             <header class="section-heading">
               <div>
-                <h2 id="audit-heading">Plan audit</h2>
+                <h2 id="audit-heading" tabindex="-1">Plan audit</h2>
                 <p id="audit-status"></p>
               </div>
               <div id="audit-options" class="audit-options" role="group" aria-label="Plan to inspect"></div>

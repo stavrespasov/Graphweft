@@ -73,14 +73,20 @@ In the [parent-weighted fork](examples/parent_weighted_fork.json), a mismatch at
 
 ### Isolate the effect of a graph edge
 
-Compare **Binary collider** and **Ordered control** in the example menu. Both use independent fair bits at A and B, with C equal to A XOR B in the source and B in the target. A mismatch at C costs two units.
+Choose **Binary collider**, open **Compare an added edge**, and compare A → B. Both graphs use independent fair bits at A and B, with C equal to A XOR B in the source and B in the target. A mismatch at C costs two units.
+
+```sh
+python -m graphweft compare-edge examples/binary_collider.json A B --summary
+```
 
 | Graph | Ordinary OT | Graph-bicausal OT |
 |---|---:|---:|
 | [Collider](examples/binary_collider.json), A and B both point to C | 0.5 | 1.0 |
 | [Ordered control](examples/ordered_control.json), adds A → B | 0.5 | 0.5 |
 
-In the collider, the paired roots must be independent. The source's XOR is independent of the target's B, so C differs half the time. In the ordered graph, the B coupling can flip B when A is one. That matches C exactly and pays half a unit at B. Auditing the ordered plan under the collider graph flags that dependence on A at node B.
+In the collider, the paired roots must be independent. The source's XOR is independent of the target's B, so C differs half the time. In the ordered graph, the B coupling can flip B when A is one. That matches C exactly and pays half a unit at B. Select **Inspect plan on original graph** to see the audit flag that dependence on A at node B.
+
+The comparison accepts a missing edge that follows the model's node order. Both graphs must be supported by the solver. The probability laws stay fixed, and any cost table affected by the new parent is expanded to give every source and target state pair the same cost as before. Use **Save expanded run** to open or verify the new plan independently. The full CLI output includes both run files as JSON objects and the audit of the expanded plan on the original graph.
 
 ## Method and verification
 
@@ -96,4 +102,4 @@ GraphWeft focuses on inspecting graph-specific plans. Existing implementations o
 python -m unittest discover -s tests -v
 ```
 
-The tests check the cost gaps, the shared-coin counterexample, empty-graph decomposition, agreement with ordinary OT for a single node, and the collider solver against an independent enumeration.
+The tests check the cost gaps, the shared-coin counterexample, empty-graph decomposition, agreement with ordinary OT for a single node, and the collider solver against an independent enumeration. Edge comparison tests check that adding a parent preserves the entire cost matrix and that both resulting runs can be verified.

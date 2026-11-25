@@ -10,16 +10,25 @@ const runFile = byId("run-file");
 const status = byId("status");
 const results = byId("results");
 const findings = byId("finding");
+const auditOptions = byId("audit-options");
+const edgeStudy = byId("edge-study");
+const edgeChoice = byId("edge-choice");
+const edgeButton = byId("compare-edge");
+const edgeStatus = byId("edge-status");
+const edgeResult = byId("edge-result");
 const labels = {
   ordinary: "Ordinary OT",
   constrained: "Graph-bicausal OT",
   candidate: "Supplied plan",
+  expanded: "Expanded plan",
 };
 const numberFormat = new Intl.NumberFormat("en", { maximumFractionDigits: 5 });
 const maxRunBytes = 1024 * 1024;
 let examples = [];
 let request;
 let completedRun;
+let edgeRequest;
+let expandedRun;
 let reports = {};
 let inspectedPlan;
 
@@ -196,14 +205,15 @@ function renderEvidence() {
 
 function inspect(name) {
   inspectedPlan = name;
-  for (const button of byId("audit-options").children) {
+  for (const button of auditOptions.children) {
     button.setAttribute("aria-pressed", String(button.dataset.plan === name));
   }
   const report = reports[name];
   const failures = report.failures.length;
-  byId("audit-status").textContent = failures
+  const summary = failures
     ? `${failures} failed ${failures === 1 ? "condition" : "conditions"} · tolerance ${format(report.absolute_tolerance)}`
     : `All checks passed · tolerance ${format(report.absolute_tolerance)}`;
+  byId("audit-status").textContent = name === "expanded" ? `Original graph · ${summary}` : summary;
   findings.replaceChildren(...report.failures.map((failure, index) => {
     const option = element("option", `${index + 1} · ${conditionTitle(failure)}`);
     option.value = index;
@@ -211,6 +221,14 @@ function inspect(name) {
   }));
   byId("finding-field").hidden = report.admissible;
   renderEvidence();
+}
+
+function auditButton(name) {
+  const button = element("button", labels[name]);
+  button.type = "button";
+  button.dataset.plan = name;
+  button.addEventListener("click", () => inspect(name));
+  return button;
 }
 
 function renderResult(data, model, mode) {
@@ -241,20 +259,18 @@ function renderResult(data, model, mode) {
   byId("plans").classList.toggle("single", mode === "audit");
 
   reports = Object.fromEntries(entries.map(([name, entry]) => [name, entry.audit]));
-  byId("audit-options").replaceChildren(...entries.map(([name]) => {
-    const button = element("button", labels[name]);
-    button.type = "button";
-    button.dataset.plan = name;
-    button.addEventListener("click", () => inspect(name));
-    return button;
-  }));
-  byId("audit-options").hidden = mode === "audit";
+  auditOptions.replaceChildren(...entries.map(([name]) => auditButton(name)));
+  auditOptions.hidden = mode === "audit";
   inspect(entries[0][0]);
+  if (mode === "compare") configureEdgeStudy(model);
   renderGraph(model);
   results.hidden = false;
 }
 
 function clearResult() {
+  clearEdgeResult();
+  edgeStudy.hidden = true;
+  edgeStudy.open = false;
   completedRun = undefined;
   saveButton.disabled = true;
   results.hidden = true;
@@ -271,6 +287,76 @@ async function postRun(path, body, signal) {
   const data = await response.json();
   if (!response.ok) throw new Error(data.error);
   return data;
+}
+
+function configureEdgeStudy(model) {
+  const options = model.nodes.flatMap((child, index) => model.nodes.slice(0, index)
+    .filter((parent) => !model.parents[child].includes(parent))
+    .map((parent) => {
+      const option = element("option", `${parent} → ${child}`);
+      option.value = JSON.stringify([parent, child]);
+      return option;
+    }));
+  edgeChoice.replaceChildren(...options);
+  edgeStudy.hidden = options.length === 0;
+}
+
+function clearEdgeResult() {
+  edgeRequest?.abort();
+  edgeRequest = undefined;
+  expandedRun = undefined;
+  edgeButton.disabled = false;
+  edgeResult.hidden = true;
+  edgeStatus.textContent = "";
+  edgeStatus.classList.remove("error");
+  if (reports.expanded) {
+    delete reports.expanded;
+    auditOptions.querySelector('[data-plan="expanded"]').remove();
+    if (inspectedPlan === "expanded") inspect("ordinary");
+  }
+}
+
+async function compareEdge() {
+  clearEdgeResult();
+  const model = completedRun.input.model;
+  const [parent, child] = JSON.parse(edgeChoice.value);
+  const active = new AbortController();
+  edgeRequest = active;
+  edgeButton.disabled = true;
+  edgeStatus.textContent = "Comparing graphs…";
+  try {
+    const study = await postRun("/api/edge", JSON.stringify({ model, parent, child }), active.signal);
+    if (edgeRequest !== active) return;
+    const before = study.original.result.constrained.cost;
+    const after = study.expanded.result.constrained.cost;
+    byId("edge-costs").replaceChildren(...[
+      ["Original constrained cost", before],
+      ["Expanded constrained cost", after],
+      ["Cost decrease", study.cost_decrease],
+    ].map(([label, value]) => {
+      const item = element("div");
+      item.append(element("dt", label), element("dd", format(value)));
+      return item;
+    }));
+    expandedRun = study.expanded;
+    reports.expanded = study.original_graph_audit;
+    const button = auditButton("expanded");
+    button.setAttribute("aria-pressed", "false");
+    auditOptions.append(button);
+    edgeStatus.textContent = reports.expanded.admissible
+      ? "The expanded plan also passes the original graph audit."
+      : "The expanded plan fails the original graph audit.";
+    edgeResult.hidden = false;
+  } catch (error) {
+    if (edgeRequest !== active) return;
+    edgeStatus.textContent = error.message || "GraphWeft could not compare the graphs.";
+    edgeStatus.classList.add("error");
+  } finally {
+    if (edgeRequest === active) {
+      edgeRequest = undefined;
+      edgeButton.disabled = false;
+    }
+  }
 }
 
 async function requestRun(message, load, imported = false) {
@@ -335,23 +421,35 @@ runFile.addEventListener("change", () => {
     return postRun("/api/replay", await file.text(), signal);
   }, true);
 });
-saveButton.addEventListener("click", () => {
-  if (!completedRun) return;
-  const file = new Blob([JSON.stringify(completedRun, null, 2) + "\n"], { type: "application/json" });
+function downloadRun(run, feedback) {
+  if (!run) return;
+  const file = new Blob([JSON.stringify(run, null, 2) + "\n"], { type: "application/json" });
   if (file.size > maxRunBytes) {
-    status.textContent = "This result exceeds the 1 MiB run-file limit.";
-    status.classList.add("error");
+    feedback.textContent = "This result exceeds the 1 MiB run-file limit.";
+    feedback.classList.add("error");
     return;
   }
   const link = element("a");
   const url = URL.createObjectURL(file);
   link.href = url;
-  link.download = `graphweft-${completedRun.input.operation}-${completedRun.manifest.input_sha256.slice(0, 8)}.json`;
+  link.download = `graphweft-${run.input.operation}-${run.manifest.input_sha256.slice(0, 8)}.json`;
   document.body.append(link);
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+saveButton.addEventListener("click", () => downloadRun(completedRun, status));
+edgeChoice.addEventListener("change", clearEdgeResult);
+byId("edge-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (completedRun && edgeChoice.value) void compareEdge();
 });
+byId("inspect-edge").addEventListener("click", () => {
+  inspect("expanded");
+  byId("audit-heading").focus();
+});
+byId("save-edge").addEventListener("click", () => downloadRun(expandedRun, edgeStatus));
 
 try {
   const response = await fetch("/api/examples");

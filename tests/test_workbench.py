@@ -92,6 +92,20 @@ class WorkbenchTests(unittest.TestCase):
         status, _, _ = self.request("GET", "/missing")
         self.assertEqual(status, 404)
 
+    def test_edge_comparison_returns_the_cross_audit_and_expanded_run(self):
+        model = json.loads((EXAMPLES / "binary_collider.json").read_text())
+        headers = {"Content-Type": "application/json"}
+        status, _, payload = self.request("POST", "/api/edge", json.dumps({
+            "model": model, "parent": "A", "child": "B",
+        }), headers)
+        self.assertEqual(status, 200)
+        study = json.loads(payload)
+        self.assertEqual(study["cost_decrease"], 0.5)
+        self.assertEqual(study["original_graph_audit"]["failures"][0]["node"], "B")
+        status, _, payload = self.request("POST", "/api/replay", json.dumps(study["expanded"]), headers)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(payload)["input"]["model"]["parents"]["B"], ["A"])
+
     def test_run_can_be_saved_and_replayed(self):
         model = json.loads((EXAMPLES / "binary_chain.json").read_text())
         headers = {"Content-Type": "application/json"}
