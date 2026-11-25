@@ -1,6 +1,7 @@
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
+from itertools import product
 
 from .audit import audit_plan
 from .edge_study import compare_added_edge
@@ -58,6 +59,16 @@ def demo_examples():
         {
             "id": "ordered-control", "label": "Ordered control", "operation": "compare",
             "model": {**collider_model, "parents": {"A": [], "B": ["A"], "C": ["A", "B"]}},
+        },
+        {
+            "id": "four-node-collider", "label": "Four-node collider", "operation": "compare",
+            "model": {
+                "nodes": [*fork_nodes, "D"],
+                "parents": {"A": [], "B": [], "C": ["B"], "D": ["A", "B", "C"]},
+                "source": [0.125 if d == a ^ b ^ c else 0 for a, b, c, d in product((0, 1), repeat=4)],
+                "target": [0.125 if d == b ^ c else 0 for _, b, c, d in product((0, 1), repeat=4)],
+                "cost_factors": {"C": [[0.5 if x % 2 != y % 2 else 0 for y in range(4)] for x in range(4)]},
+            },
         },
         {
             "id": "shared-coin", "label": "Shared-coin audit", "operation": "audit",

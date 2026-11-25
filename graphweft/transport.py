@@ -8,7 +8,6 @@ from .audit import PAIRS, audit_plan
 from .model import AUDIT_TOLERANCE, paired_tensor
 
 _HAMMING_PAIR = np.array([int(x != y) for x, y in PAIRS])
-_COLLIDER = ((), (), (0, 1))
 
 
 def _solve(objective, rows, targets):
@@ -67,15 +66,8 @@ def _joint_from_kernels(model, kernels):
     return plan
 
 
-def _graph(model):
+def _perfect_graph(model):
     parents = model.parents
-    for node, past in enumerate(parents):
-        if past and not set(past[:-1]).issubset(parents[past[-1]]):
-            raise ValueError(
-                f"Graph solver supports perfect DAGs and the binary three-node collider. "
-                f"Parents of {model.nodes[node]} are not a clique."
-            )
-
     families = [(*past, node) for node, past in enumerate(parents)]
     indices = []
     size = 0
@@ -128,35 +120,69 @@ def _graph(model):
 
 
 def _binary_endpoints(left, right):
-    # Fixing the (0, 0) mass determines the other three cells of a binary coupling.
-    lower = max(0.0, left[0] - right[1])
-    upper = min(left[0], right[0])
-    return tuple(
-        np.maximum((mass, left[0] - mass, right[0] - mass, left[1] - right[0] + mass), 0)
-        for mass in (lower, upper)
+    # Each endpoint has at least one exact zero, including when a marginal is deterministic.
+    x0, x1 = left
+    y0, y1 = right
+    return (
+        (max(0.0, x0 - y1), min(x0, y1), min(x1, y0), max(0.0, y1 - x0)),
+        (min(x0, y0), max(0.0, x0 - y0), max(0.0, y0 - x0), min(x1, y1)),
     )
 
 
-def _collider(model):
-    child_cost = np.broadcast_to(_paired_costs(model, 2), (4, 4, 4))
-    child_plan = np.empty(child_cost.shape)
-    remaining_cost = np.empty((4, 4))
-    for context in np.ndindex(4, 4):
-        endpoints = np.array(_binary_endpoints(*_conditional_marginals(model, 2, context)))
-        values = endpoints @ child_cost[context]
-        chosen = np.argmin(values)
-        child_plan[context] = endpoints[chosen]
-        remaining_cost[context] = values[chosen]
+def _binary_graph(model):
+    """Minimize a multi-affine objective over the binary coupling intervals."""
+    history_contexts, endpoint_tables, endpoint_costs = [], [], []
+    for node, parents in enumerate(model.parents):
+        # For each paired history, index the row for its paired parent context.
+        histories = np.indices((4,) * node).reshape(node, 4**node)
+        contexts = np.zeros(4**node, dtype=int)
+        for parent in parents:
+            contexts = 4 * contexts + histories[parent]
+        history_contexts.append(contexts)
 
-    root_cost = _paired_costs(model, 0)[:, None] + _paired_costs(model, 1)[None, :]
-    objective = root_cost + remaining_cost
-    root_options = [_binary_endpoints(*_conditional_marginals(model, node, ())) for node in (0, 1)]
-    # A bilinear objective on the two root intervals attains a minimum at a corner.
-    value, roots = min(
-        ((float(left @ objective @ right), (left, right)) for left, right in product(*root_options)),
-        key=lambda candidate: candidate[0],
+        endpoints = np.array([
+            _binary_endpoints(*_conditional_marginals(model, node, context))
+            for context in np.ndindex((4,) * len(parents))
+        ])
+        costs = _paired_costs(model, node).reshape(-1, 4)
+        endpoint_tables.append(endpoints)
+        endpoint_costs.append((endpoints * costs[:, None, :]).sum(axis=-1))
+
+    # The last node has no descendants. Choose the cheaper endpoint for each parent context.
+    last = model.width - 1
+    last_rows = np.arange(len(endpoint_tables[last]))
+    last_choices = endpoint_costs[last].argmin(axis=1)
+    last_kernel = endpoint_tables[last][last_rows, last_choices]
+    last_cost_by_history = endpoint_costs[last][last_rows, last_choices][history_contexts[last]]
+
+    def search(node, history_mass):
+        if node == last:
+            return float(history_mass @ last_cost_by_history), (last_kernel,)
+
+        endpoints = endpoint_tables[node]
+        contexts = history_contexts[node]
+        rows = np.arange(len(endpoints))
+        context_mass = np.bincount(contexts, weights=history_mass, minlength=len(endpoints))
+        distinct = (endpoints[:, 0] != endpoints[:, 1]).any(axis=1)
+        active = np.flatnonzero((context_mass > 0) & distinct)
+        choices = np.zeros(len(endpoints), dtype=int)
+        best_value, best_kernels = float("inf"), ()
+        for selected in product((0, 1), repeat=len(active)):
+            choices[active] = selected
+            kernel = endpoints[rows, choices]
+            next_mass = (history_mass[:, None] * kernel[contexts]).ravel()
+            future_cost, suffix = search(node + 1, next_mass)
+            value = float(context_mass @ endpoint_costs[node][rows, choices]) + future_cost
+            if value < best_value:
+                best_value, best_kernels = value, (kernel, *suffix)
+        return best_value, best_kernels
+
+    value, rows = search(0, np.ones(1))
+    kernels = tuple(
+        table.reshape((4,) * (len(parents) + 1))
+        for table, parents in zip(rows, model.parents)
     )
-    return _joint_from_kernels(model, (*roots, child_plan)), value
+    return _joint_from_kernels(model, kernels), value
 
 
 def hamming_costs(model):
@@ -202,13 +228,14 @@ def costs_match(model, expected, claimed):
 def compare(model):
     matrices = cost_matrices(model)
     costs = np.sum(matrices, axis=0)
-    constrained = _collider(model) if model.parents == _COLLIDER else _graph(model)
+    perfect = all(not past or set(past[:-1]).issubset(model.parents[past[-1]]) for past in model.parents)
+    constrained = _perfect_graph(model) if perfect else _binary_graph(model)
     ordinary = _ordinary(model, costs)
     result = {"states": list(model.states)}
     for name, (plan, optimum) in (("ordinary", ordinary), ("constrained", constrained)):
         cost = float((plan * costs).sum())
         if abs(cost - optimum) > AUDIT_TOLERANCE:
-            raise RuntimeError(f"Reconstructed {name} witness disagrees with the LP objective")
+            raise RuntimeError(f"Reconstructed {name} witness disagrees with the solver objective")
         by_node = plan_costs(model, plan, matrices)
         reported_cost = sum(by_node.values())
         if not isfinite(reported_cost):

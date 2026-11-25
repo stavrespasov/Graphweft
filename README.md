@@ -57,7 +57,7 @@ This example returns exit code `1` for an inadmissible plan and prints the faile
 
 Start from [the chain fixture](examples/binary_chain.json). Define one to four binary nodes in topological order and list the parents of each node. The source and target vectors assign mass to lexicographically ordered bit strings. For two nodes, the order is `00`, `01`, `10`, `11`. Both probability laws must factor according to the graph.
 
-The solver accepts **perfect DAGs**, where the parents of every node form a clique, and the three-node binary collider. The auditor accepts any supported-size DAG. An audit input is a JSON coupling matrix whose rows follow source-state order and whose columns follow target-state order.
+The solver and auditor accept any DAG on one to four binary nodes. An audit input is a JSON coupling matrix whose rows follow source-state order and whose columns follow target-state order.
 
 ### Specify parent-dependent costs
 
@@ -86,13 +86,19 @@ python -m graphweft compare-edge examples/binary_collider.json A B --summary
 
 In the collider, the paired roots must be independent. The source's XOR is independent of the target's B, so C differs half the time. In the ordered graph, the B coupling can flip B when A is one. That matches C exactly and pays half a unit at B. Select **Inspect plan on original graph** to see the audit flag that dependence on A at node B.
 
-The comparison accepts a missing edge that follows the model's node order. Both graphs must be supported by the solver. The probability laws stay fixed, and any cost table affected by the new parent is expanded to give every source and target state pair the same cost as before. Use **Save expanded run** to open or verify the new plan independently. The full CLI output includes both run files as JSON objects and the audit of the expanded plan on the original graph.
+The comparison accepts a missing edge that follows the model's node order. The probability laws stay fixed, and any cost table affected by the new parent is expanded to give every source and target state pair the same cost as before. Use **Save expanded run** to open or verify the new plan independently. The full CLI output includes both runs as JSON objects and the audit of the expanded plan on the original graph.
+
+Choose **Four-node collider** to see the effect of an edge upstream of another node. Here the source uses `D = A XOR B XOR C` and the target uses `D = B XOR C`. Adding A → C lets the plan flip C when A is one. This eliminates mismatches at D and reduces the constrained cost from **0.5 to 0.25**. The audit flags C's dependence on A under the original graph. [Four-node fixture](examples/four_node_collider.json)
+
+```sh
+python -m graphweft compare-edge examples/four_node_collider.json A C --summary
+```
 
 ## Method and verification
 
-The ordinary solver uses a full-coupling LP in SciPy/HiGHS. For perfect DAGs the constrained solver uses one LP over the paired state at each node and its parents. Linear constraints match each input’s local marginals and enforce consistency between overlapping tables. The conditional kernels reconstruct the plan. [Kernel characterization and graph-separable costs, Propositions 4.7 and 5.2–5.3](https://arxiv.org/html/2608.13716v1)
+The ordinary solver uses a full-coupling LP in SciPy/HiGHS. For perfect DAGs, where every node's parents form a clique, the constrained solver uses one LP over the paired state at each node and its parents. Linear constraints match each input’s local marginals and enforce consistency between overlapping tables. The conditional kernels reconstruct the plan. [Kernel characterization and graph-separable costs, Propositions 4.7 and 5.2–5.3](https://arxiv.org/html/2608.13716v1)
 
-The collider solver minimizes the child cost separately at each paired parent context. A binary coupling is an interval because its `(0, 0)` mass fixes the other three entries. The root objective is bilinear in the two independent root couplings, so a minimum occurs at a pair of interval endpoints. The solver evaluates the four root combinations and reconstructs the selected plan.
+For other DAGs, the solver searches endpoints of the binary coupling intervals. At each paired parent context, the `(0, 0)` mass fixes the other three entries. Each joint outcome multiplies one kernel entry per node, so the expected cost is affine in each interval coordinate when the others are fixed. A minimum therefore occurs at some combination of endpoints. The search skips unreachable contexts and minimizes the final node's cost independently at each of its parent contexts. The number of combinations can grow exponentially, so the implementation is scoped to four nodes.
 
 The audit checks joint marginals, prescribed conditional marginals, and the dependence of each paired state on earlier pairs. Custom objectives are scaled by the sum of the maximum local costs when that sum is positive. Costs are displayed in their original units. Verification checks probability audits at an absolute tolerance of `1e-8` and custom objective values at that tolerance in solver units.
 
@@ -102,4 +108,4 @@ GraphWeft focuses on inspecting graph-specific plans. Existing implementations o
 python -m unittest discover -s tests -v
 ```
 
-The tests check the cost gaps, the shared-coin counterexample, empty-graph decomposition, agreement with ordinary OT for a single node, and the collider solver against an independent enumeration. Edge comparison tests check that adding a parent preserves the entire cost matrix and that both resulting runs can be verified.
+The tests check the cost gaps, the shared-coin counterexample, empty-graph decomposition, and agreement with ordinary OT for a single node. They cover all 64 four-node graphs in a fixed node order on a product-law fixture and compare the collider solver against independent enumeration. Edge comparison tests check that adding a parent preserves the entire cost matrix and that both resulting runs can be verified.

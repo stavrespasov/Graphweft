@@ -46,6 +46,7 @@ class WorkbenchTests(unittest.TestCase):
         for key, filename in (("fork", "binary_fork.json"), ("weighted-fork", "parent_weighted_fork.json"),
                               ("chain", "binary_chain.json"), ("collider", "binary_collider.json"),
                               ("ordered-control", "ordered_control.json"),
+                              ("four-node-collider", "four_node_collider.json"),
                               ("shared-coin", "shared_coin_model.json")):
             self.assertEqual(examples[key]["model"], json.loads((EXAMPLES / filename).read_text()))
         self.assertEqual(examples["shared-coin"]["plan"], json.loads((EXAMPLES / "shared_coin_plan.json").read_text()))
