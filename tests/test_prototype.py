@@ -53,9 +53,12 @@ class TransportTests(unittest.TestCase):
         })
         self.assertEqual(compare(model)["constrained"]["cost"], 0.5)
 
-    def test_colliders_are_outside_solver_domain(self):
+    def test_four_node_imperfect_dags_are_outside_solver_domain(self):
         case = example("shared_coin_model.json")
-        case["parents"] = {"A": [], "B": [], "C": ["A", "B"]}
+        case["nodes"].append("D")
+        case["parents"] = {"A": [], "B": [], "C": ["A", "B"], "D": []}
+        case["source"] = [1 / 16] * 16
+        case["target"] = [1 / 16] * 16
         model = Model.from_dict(case)
         with self.assertRaisesRegex(ValueError, "perfect DAG"):
             compare(model)

@@ -1,3 +1,4 @@
+from itertools import product
 from math import isclose, isfinite, prod
 
 import numpy as np
@@ -7,6 +8,7 @@ from .audit import PAIRS, audit_plan
 from .model import AUDIT_TOLERANCE, paired_tensor
 
 _HAMMING_PAIR = np.array([int(x != y) for x, y in PAIRS])
+_COLLIDER = ((), (), (0, 1))
 
 
 def _solve(objective, rows, targets):
@@ -37,11 +39,42 @@ def _ordinary(model, costs):
     return optimum.x.reshape(size, size), float(optimum.fun)
 
 
+def _paired_costs(model, node):
+    factor = model.cost_factors.get(model.nodes[node])
+    if factor is None:
+        return _HAMMING_PAIR / model.cost_scale
+    return paired_tensor(factor / model.cost_scale, len(model.parents[node]) + 1)
+
+
+def _conditional_marginals(model, node, context):
+    return tuple(
+        model.laws[side][node][tuple(PAIRS[z][side] for z in context)]
+        for side in (0, 1)
+    )
+
+
+def _joint_from_kernels(model, kernels):
+    dimension = len(model.source)
+    plan = np.zeros((dimension, dimension))
+    for outcome in np.ndindex((4,) * model.width):
+        weight = prod(
+            kernels[i][tuple(outcome[j] for j in pa) + (outcome[i],)]
+            for i, pa in enumerate(model.parents)
+        )
+        left = int("".join(str(PAIRS[z][0]) for z in outcome), 2)
+        right = int("".join(str(PAIRS[z][1]) for z in outcome), 2)
+        plan[left, right] = weight
+    return plan
+
+
 def _graph(model):
     parents = model.parents
     for node, past in enumerate(parents):
         if past and not set(past[:-1]).issubset(parents[past[-1]]):
-            raise ValueError(f"Graph solver requires a perfect DAG. Parents of {model.nodes[node]} are not a clique")
+            raise ValueError(
+                f"Graph solver supports perfect DAGs and the binary three-node collider. "
+                f"Parents of {model.nodes[node]} are not a clique."
+            )
 
     families = [(*past, node) for node, past in enumerate(parents)]
     indices = []
@@ -56,11 +89,7 @@ def _graph(model):
     fixed_marginals = []
     for node, past in enumerate(parents):
         node_marginals = {}
-        factor = model.cost_factors.get(model.nodes[node])
-        if factor is None:
-            objective[indices[node]] = _HAMMING_PAIR / model.cost_scale
-        else:
-            objective[indices[node]] = paired_tensor(factor / model.cost_scale, len(past) + 1)
+        objective[indices[node]] = _paired_costs(model, node)
         for context in np.ndindex((4,) * len(past)):
             entries = indices[node][context]
             equation = np.zeros(size)
@@ -75,10 +104,7 @@ def _graph(model):
             rows.append(equation)
             targets.append(0 if past else 1)
 
-            distributions = tuple(
-                model.laws[side][node][tuple(PAIRS[z][side] for z in context)]
-                for side in (0, 1)
-            )
+            distributions = _conditional_marginals(model, node, context)
             node_marginals[context] = distributions
             for side, law in enumerate(distributions):
                 for bit in (0, 1):
@@ -98,17 +124,39 @@ def _graph(model):
             kernel[context] = weights / mass if mass > 0 else np.outer(left, right).ravel()
         kernels.append(kernel)
 
-    dimension = len(model.source)
-    plan = np.zeros((dimension, dimension))
-    for outcome in np.ndindex((4,) * model.width):
-        weight = prod(
-            kernels[i][tuple(outcome[j] for j in pa) + (outcome[i],)]
-            for i, pa in enumerate(parents)
-        )
-        left = int("".join(str(PAIRS[z][0]) for z in outcome), 2)
-        right = int("".join(str(PAIRS[z][1]) for z in outcome), 2)
-        plan[left, right] = weight
-    return plan, float(optimum.fun)
+    return _joint_from_kernels(model, kernels), float(optimum.fun)
+
+
+def _binary_endpoints(left, right):
+    # Fixing the (0, 0) mass determines the other three cells of a binary coupling.
+    lower = max(0.0, left[0] - right[1])
+    upper = min(left[0], right[0])
+    return tuple(
+        np.maximum((mass, left[0] - mass, right[0] - mass, left[1] - right[0] + mass), 0)
+        for mass in (lower, upper)
+    )
+
+
+def _collider(model):
+    child_cost = np.broadcast_to(_paired_costs(model, 2), (4, 4, 4))
+    child_plan = np.empty(child_cost.shape)
+    remaining_cost = np.empty((4, 4))
+    for context in np.ndindex(4, 4):
+        endpoints = np.array(_binary_endpoints(*_conditional_marginals(model, 2, context)))
+        values = endpoints @ child_cost[context]
+        chosen = np.argmin(values)
+        child_plan[context] = endpoints[chosen]
+        remaining_cost[context] = values[chosen]
+
+    root_cost = _paired_costs(model, 0)[:, None] + _paired_costs(model, 1)[None, :]
+    objective = root_cost + remaining_cost
+    root_options = [_binary_endpoints(*_conditional_marginals(model, node, ())) for node in (0, 1)]
+    # A bilinear objective on the two root intervals attains a minimum at a corner.
+    value, roots = min(
+        ((float(left @ objective @ right), (left, right)) for left, right in product(*root_options)),
+        key=lambda candidate: candidate[0],
+    )
+    return _joint_from_kernels(model, (*roots, child_plan)), value
 
 
 def hamming_costs(model):
@@ -154,7 +202,7 @@ def costs_match(model, expected, claimed):
 def compare(model):
     matrices = cost_matrices(model)
     costs = np.sum(matrices, axis=0)
-    constrained = _graph(model)
+    constrained = _collider(model) if model.parents == _COLLIDER else _graph(model)
     ordinary = _ordinary(model, costs)
     result = {"states": list(model.states)}
     for name, (plan, optimum) in (("ordinary", ordinary), ("constrained", constrained)):

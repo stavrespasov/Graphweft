@@ -57,7 +57,7 @@ This example returns exit code `1` for an inadmissible plan and prints the faile
 
 Start from [the chain fixture](examples/binary_chain.json). Define one to four binary nodes in topological order and list the parents of each node. The source and target vectors assign mass to lexicographically ordered bit strings. For two nodes, the order is `00`, `01`, `10`, `11`. Both probability laws must factor according to the graph.
 
-The solver accepts **perfect DAGs**, where the parents of every node form a clique. The auditor also accepts other DAGs within the same size limit. An audit input is a JSON coupling matrix whose rows follow source-state order and whose columns follow target-state order.
+The solver accepts **perfect DAGs**, where the parents of every node form a clique, and the three-node binary collider. The auditor accepts any supported-size DAG. An audit input is a JSON coupling matrix whose rows follow source-state order and whose columns follow target-state order.
 
 ### Specify parent-dependent costs
 
@@ -71,9 +71,24 @@ python -m graphweft compare examples/parent_weighted_fork.json --summary
 
 In the [parent-weighted fork](examples/parent_weighted_fork.json), a mismatch at C costs two units when source A is zero and four when source A is one. Ordinary OT can match C and pay a total of **1.0**. Graph-bicausal OT costs **2.5**, with **1.5** from C. The **Cost by node** table shows each term in the totals. Saved runs include the cost tables and verify them along with the resulting costs.
 
+### Isolate the effect of a graph edge
+
+Compare **Binary collider** and **Ordered control** in the example menu. Both use independent fair bits at A and B, with C equal to A XOR B in the source and B in the target. A mismatch at C costs two units.
+
+| Graph | Ordinary OT | Graph-bicausal OT |
+|---|---:|---:|
+| [Collider](examples/binary_collider.json), A and B both point to C | 0.5 | 1.0 |
+| [Ordered control](examples/ordered_control.json), adds A → B | 0.5 | 0.5 |
+
+In the collider, the paired roots must be independent. The source's XOR is independent of the target's B, so C differs half the time. In the ordered graph, the B coupling can flip B when A is one. That matches C exactly and pays half a unit at B. Auditing the ordered plan under the collider graph flags that dependence on A at node B.
+
 ## Method and verification
 
-The ordinary solver uses a full-coupling LP. The graph solver uses one LP over the paired state at each node and its parents. Linear constraints match each input’s local marginals and enforce consistency between overlapping tables. The resulting conditional kernels reconstruct the plan. The audit checks joint marginals, prescribed conditional marginals, and the dependence of each paired state on earlier pairs. Both solvers use SciPy/HiGHS. Custom objectives are scaled by the sum of the maximum local costs when that sum is positive. Costs are displayed in their original units. Verification checks probability audits at an absolute tolerance of `1e-8` and custom objective values at that tolerance in solver units. [Kernel characterization and graph-separable costs, Propositions 4.7 and 5.2–5.3](https://arxiv.org/html/2608.13716v1)
+The ordinary solver uses a full-coupling LP in SciPy/HiGHS. For perfect DAGs the constrained solver uses one LP over the paired state at each node and its parents. Linear constraints match each input’s local marginals and enforce consistency between overlapping tables. The conditional kernels reconstruct the plan. [Kernel characterization and graph-separable costs, Propositions 4.7 and 5.2–5.3](https://arxiv.org/html/2608.13716v1)
+
+The collider solver minimizes the child cost separately at each paired parent context. A binary coupling is an interval because its `(0, 0)` mass fixes the other three entries. The root objective is bilinear in the two independent root couplings, so a minimum occurs at a pair of interval endpoints. The solver evaluates the four root combinations and reconstructs the selected plan.
+
+The audit checks joint marginals, prescribed conditional marginals, and the dependence of each paired state on earlier pairs. Custom objectives are scaled by the sum of the maximum local costs when that sum is positive. Costs are displayed in their original units. Verification checks probability audits at an absolute tolerance of `1e-8` and custom objective values at that tolerance in solver units.
 
 GraphWeft focuses on inspecting graph-specific plans. Existing implementations of time-adapted transport provide related numerical baselines. [AOTNumerics](https://github.com/stephaneckstein/aotnumerics) [PNOT](https://github.com/justinhou95/NestedOT)
 
@@ -81,4 +96,4 @@ GraphWeft focuses on inspecting graph-specific plans. Existing implementations o
 python -m unittest discover -s tests -v
 ```
 
-The tests check the two cost gaps, the shared-coin counterexample, empty-graph decomposition, and agreement with ordinary OT for a single node.
+The tests check the cost gaps, the shared-coin counterexample, empty-graph decomposition, agreement with ordinary OT for a single node, and the collider solver against an independent enumeration.

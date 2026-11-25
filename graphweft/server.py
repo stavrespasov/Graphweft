@@ -22,6 +22,12 @@ def demo_examples():
         "nodes": fork_nodes, "parents": fork_edges,
         "source": [0.5, 0, 0, 0, 0, 0, 0, 0.5], "target": [0.25] * 4 + [0] * 4,
     }
+    collider_model = {
+        "nodes": fork_nodes, "parents": {"A": [], "B": [], "C": ["A", "B"]},
+        "source": [0.25, 0, 0, 0.25, 0, 0.25, 0.25, 0],
+        "target": [0.25, 0, 0, 0.25, 0.25, 0, 0, 0.25],
+        "cost_factors": {"C": [[2 if x % 2 != y % 2 else 0 for y in range(8)] for x in range(8)]},
+    }
     shared_coin_plan = [
         [0.0625 if target in (source, source ^ 3) else 0 for target in range(8)]
         for source in range(8)
@@ -43,6 +49,14 @@ def demo_examples():
                 "nodes": ["A", "B"], "parents": {"A": [], "B": ["A"]},
                 "source": [0.5, 0, 0, 0.5], "target": [0.5, 0.5, 0, 0],
             },
+        },
+        {
+            "id": "collider", "label": "Binary collider", "operation": "compare",
+            "model": collider_model,
+        },
+        {
+            "id": "ordered-control", "label": "Ordered control", "operation": "compare",
+            "model": {**collider_model, "parents": {"A": [], "B": ["A"], "C": ["A", "B"]}},
         },
         {
             "id": "shared-coin", "label": "Shared-coin audit", "operation": "audit",
