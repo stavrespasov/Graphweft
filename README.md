@@ -2,6 +2,10 @@
 
 GraphWeft compares ordinary optimal transport with **graph-bicausal optimal transport** on a supplied directed acyclic graph. It shows how an information constraint changes the lowest transport cost and pinpoints the conditional probabilities that make a plan inadmissible.
 
+## Capital Bikeshare case study
+
+An ordinary plan for working-day versus non-working-day rentals fails the graph audit even though a graph-bicausal plan achieves the same cost. A fuller fit to the same days reveals an evening transport penalty. The study includes both replayable reports and a comparison with AOTNumerics. [Capital Bikeshare case study](studies/bike_sharing/README.md)
+
 ## Browser workbench
 
 From the repository root, use Python 3.10 or newer in a virtual environment.

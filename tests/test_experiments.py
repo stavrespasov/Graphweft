@@ -6,11 +6,12 @@ import unittest
 import numpy as np
 
 from graphweft.audit import audit_plan
-from graphweft.experiments import RUN_SCHEMA, create_run, verify_run
+from graphweft.experiments import RUN_SCHEMA, create_run, verify_run, verify_saved_document
 from graphweft.model import Model
 from graphweft.transport import cost_matrices, hamming_costs, plan_costs
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
+BIKE_STUDY = EXAMPLES.parent / "studies" / "bike_sharing"
 
 
 def load(name):
@@ -49,6 +50,25 @@ class RunFileTests(unittest.TestCase):
         saved["result"]["ordinary"]["cost_by_node"] = plan_costs(model, np.array(alternative), cost_matrices(model))
         verified = verify_run(saved)
         self.assertEqual(verified["result"]["ordinary"]["plan"], alternative)
+
+    def test_cost_gap_ignores_negative_roundoff_on_replay(self):
+        saved = create_run({"operation": "compare", "model": {
+            "nodes": ["A"], "parents": {"A": []},
+            "source": [1 / 6, 5 / 6], "target": [1 / 3, 2 / 3],
+        }})
+        self.assertEqual(saved["result"]["cost_gap"], 0)
+        # Earlier versions could save the raw negative subtraction.
+        saved["result"]["cost_gap"] = -2.7755575615628914e-17
+        self.assertEqual(verify_run(saved)["result"]["cost_gap"], 0)
+
+    def test_bike_study_reports_replay_with_the_documented_gaps(self):
+        chain = verify_saved_document(json.loads((BIKE_STUDY / "chain-search.json").read_text()))
+        self.assertEqual(chain["minimum_edges_to_ordinary"], 0)
+        self.assertFalse(chain["original"]["result"]["ordinary"]["audit"]["admissible"])
+        self.assertEqual(chain["best_additions"][0]["cost_decrease"], 0)
+
+        full = verify_run(json.loads((BIKE_STUDY / "full-history-run.json").read_text()))
+        self.assertAlmostEqual(full["result"]["cost_gap"], 0.04535599870726803)
 
     def test_rejects_changed_inputs_costs_audits_and_schema(self):
         original = compare_example()

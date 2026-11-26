@@ -233,5 +233,5 @@ def compare(model):
     gap = result["constrained"]["cost"] - result["ordinary"]["cost"]
     if gap / model.cost_scale < -AUDIT_TOLERANCE:
         raise RuntimeError("Constrained optimum undercuts the ordinary optimum")
-    result["cost_gap"] = gap
+    result["cost_gap"] = max(0.0, gap)
     return result

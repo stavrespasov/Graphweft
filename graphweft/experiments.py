@@ -128,7 +128,7 @@ def _verify_comparison(model, saved, legacy):
             raise ValueError(f"The saved {name} audit does not match its plan.")
         result[name] = {"plan": plan.tolist(), "cost": cost, "cost_by_node": by_node, "audit": audit}
 
-    gap = result["constrained"]["cost"] - result["ordinary"]["cost"]
+    gap = max(0.0, result["constrained"]["cost"] - result["ordinary"]["cost"])
     if not costs_match(model, gap, saved.get("cost_gap")):
         raise ValueError("The saved cost gap does not match the verified costs.")
     result["cost_gap"] = gap
