@@ -12,6 +12,7 @@ from graphweft.experiments import verify_saved_document
 from graphweft.model import Model
 from graphweft.transport import compare
 from reference_transport import reference_optima
+from studies.dependency_strength import run as strength_study
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 STUDIES = EXAMPLES.parent / "studies"
@@ -95,6 +96,15 @@ class ReferenceTransportTests(unittest.TestCase):
                 run = saved.get("original", saved)
                 observed = self.assert_reference_matches(run["input"]["model"])
                 np.testing.assert_allclose(observed, expected, rtol=0, atol=1e-10)
+
+    def test_dependency_strength_sweep_matches_closed_form_and_independent_optima(self):
+        for strength, graph in product(strength_study.STRENGTHS, strength_study.GRAPHS):
+            with self.subTest(strength=strength, graph=graph):
+                specification = strength_study.specification(strength, graph)
+                ordinary, constrained = self.assert_reference_matches(specification)
+                expected_constrained = min(strength, 0.5) if graph in ("both_into_c", "complete") else strength
+                self.assertAlmostEqual(ordinary, strength / 4, places=10)
+                self.assertAlmostEqual(constrained, expected_constrained / 2, places=10)
 
     def test_interacting_edges_search_matches_reference_over_all_subsets(self):
         specification = json.loads((EXAMPLES / "interacting_edges.json").read_text())

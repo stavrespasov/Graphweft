@@ -14,7 +14,7 @@ A saved ordinary plan for working-day versus non-working-day Bikeshare rentals a
 
 Costs are expected mismatches across three binary time slots. Each study includes data preparation instructions and a saved witness. The [technical note](docs/technical-note.md) gives the mathematical formulation, independent checks, and limits. The [benchmarks](benchmarks/README.md) record runtime and traced allocations over the supported problem sizes.
 
-To reproduce the comparison in the workbench from a fresh checkout, follow the [reviewer walkthrough](studies/bike_sharing/REVIEW.md).
+To reproduce the comparison in the workbench from a fresh checkout, follow the [reviewer walkthrough](studies/bike_sharing/REVIEW.md). A [controlled four-node study](studies/dependency_strength/README.md) holds both laws and the cost fixed across graph comparisons and shows when two added edges start to lower the optimum.
 
 ## Browser workbench
 
@@ -184,7 +184,7 @@ python -m unittest discover -s tests -p test_reference_transport.py -v
 
 The test-only reference uses the full coupling matrix as its decision variables. A linear program checks ordinary OT. A mixed-integer program checks graph-bicausal OT by enforcing the prescribed marginals at each paired history. Where histories share a paired parent context, a single binary variable selects a common zero cell of their `2 × 2` kernels. Their fixed marginals then determine the same kernel. An optimum exists at an endpoint in each binary kernel's coupling interval, so the reference can make this restriction while preserving the optimum.
 
-These checks cover 128 seeded cases across all 64 four-node edge patterns in a fixed node order, six synthetic fixtures, three real-data comparisons, and all eight configurations in the interacting-edges search. Generated cases include parent-dependent laws, structural zeros, and asymmetric costs. The reference uses floating-point solvers. The separate rare-state regressions use analytic optima for masses down to `1e-100`.
+These checks cover 128 seeded cases across all 64 four-node edge patterns in a fixed node order, six synthetic fixtures, three real-data comparisons, all eight configurations in the interacting-edges search, and 25 cases in the dependency-strength sweep. Generated cases include parent-dependent laws, structural zeros, and asymmetric costs. The reference uses floating-point solvers. The separate rare-state regressions use analytic optima for masses down to `1e-100`.
 
 Run the full suite with the same test dependencies.
 
@@ -196,6 +196,8 @@ The full suite also checks the shared-coin counterexample, empty-graph decomposi
 
 The failure-mode inventory maps model validation, numerical, file replay, server, browser, and study failures to their regression tests. It includes commands for running the browser suite. [Failure modes and regression checks](docs/failure-modes.md)
 
-## License
+## Citation and licenses
 
-GraphWeft is released under the [MIT license](LICENSE). The study pages cite the licenses and attribution for their source datasets. [Capital Bikeshare](studies/bike_sharing/README.md) · [Household appliance energy](studies/appliance_energy/README.md)
+Use GitHub's **Cite this repository** panel or the [citation metadata](CITATION.cff) to cite GraphWeft. The software is under the [MIT license](LICENSE).
+
+UCI distributes both source datasets under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). This repository contains derived binary models, summaries, and transport reports. The reproduction instructions download the original archives from UCI, and each case study identifies its source and describes the transformations. [Capital Bikeshare](studies/bike_sharing/README.md) · [Household appliance energy](studies/appliance_energy/README.md)

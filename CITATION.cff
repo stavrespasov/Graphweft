@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use GraphWeft in your research, please cite this software."
+title: GraphWeft
+type: software
+authors:
+  - given-names: Stavre
+    family-names: Spasov
+repository-code: https://github.com/stavrespasov/Graphweft
+license: MIT
