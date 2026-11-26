@@ -4,8 +4,8 @@ import sys
 from pathlib import Path
 
 from .audit import audit_plan
-from .edge_study import compare_added_edge, scan_added_edges, search_added_edges
-from .experiments import MAX_RUN_BYTES, verify_run
+from .edge_study import EDGE_SEARCH_SCHEMA, compare_added_edge, scan_added_edges, search_added_edges
+from .experiments import MAX_RUN_BYTES, verify_saved_document
 from .model import Model
 from .transport import compare
 
@@ -41,8 +41,8 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     browser = commands.add_parser("serve", help="open a local browser workbench")
     browser.add_argument("--port", type=int, default=8765, help="loopback port (default: 8765)")
-    verification = commands.add_parser("verify-run", help="recheck the claims in a saved run")
-    verification.add_argument("file", help="GraphWeft run JSON file")
+    verification = commands.add_parser("verify-run", help="recheck a saved transport run or edge search")
+    verification.add_argument("file", help="GraphWeft JSON file")
     for name, help_text in (
         ("compare", "solve ordinary and graph-bicausal transport"),
         ("compare-edge", "compare transport before and after adding a forward edge"),
@@ -67,13 +67,22 @@ def main(argv=None):
             serve(args.port)
             return 0
         if args.command == "verify-run":
-            run = verify_run(read_run(args.file))
-            operation = run["input"]["operation"]
-            result = {"verified": True, "operation": operation, "input_sha256": run["manifest"]["input_sha256"]}
-            if operation == "compare":
-                result["costs"] = {name: run["result"][name]["cost"] for name in ("ordinary", "constrained")}
+            run = verify_saved_document(read_run(args.file))
+            if run["schema"] == EDGE_SEARCH_SCHEMA:
+                result = {
+                    "verified": True,
+                    "operation": "search-edges",
+                    "input_sha256": run["original"]["manifest"]["input_sha256"],
+                    "graphs_evaluated": run["graphs_evaluated"],
+                    "minimum_edges_to_ordinary": run["minimum_edges_to_ordinary"],
+                }
             else:
-                result["admissible"] = run["result"]["audit"]["admissible"]
+                operation = run["input"]["operation"]
+                result = {"verified": True, "operation": operation, "input_sha256": run["manifest"]["input_sha256"]}
+                if operation == "compare":
+                    result["costs"] = {name: run["result"][name]["cost"] for name in ("ordinary", "constrained")}
+                else:
+                    result["admissible"] = run["result"]["audit"]["admissible"]
             print(json.dumps(result, indent=2, allow_nan=False))
             return 0
         specification = read_json(args.model)

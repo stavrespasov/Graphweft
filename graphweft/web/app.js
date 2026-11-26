@@ -21,6 +21,7 @@ const edgeStatus = byId("edge-status");
 const edgeResult = byId("edge-result");
 const edgeRanking = byId("edge-ranking");
 const edgeRows = byId("edge-rows");
+const saveEdgeSearch = byId("save-edge-search");
 const labels = {
   ordinary: "Ordinary OT",
   constrained: "Graph-bicausal OT",
@@ -29,9 +30,11 @@ const labels = {
 };
 const numberFormat = new Intl.NumberFormat("en", { maximumFractionDigits: 5 });
 const maxRunBytes = 1024 * 1024;
+const edgeSearchSchema = "graphweft.edge-search/1";
 let examples = [];
 let request;
 let completedRun;
+let completedSearch;
 let edgeRequest;
 let expandedRun;
 let reports = {};
@@ -288,6 +291,7 @@ function clearResult() {
   edgeStudy.hidden = true;
   edgeStudy.open = false;
   completedRun = undefined;
+  completedSearch = undefined;
   saveButton.disabled = true;
   results.hidden = true;
   byId("graph").hidden = true;
@@ -314,6 +318,7 @@ function configureEdgeStudy(model) {
       return option;
     }));
   edgeChoice.replaceChildren(...options);
+  byId("edge-form").hidden = options.length === 0;
   edgeStudy.hidden = options.length === 0;
 }
 
@@ -366,6 +371,8 @@ function renderEdgeResult(study, before) {
 
 function renderEdgeRanking(scan) {
   const before = scan.original.result.constrained.cost;
+  completedSearch = undefined;
+  saveEdgeSearch.hidden = true;
   renderEdgeTable(scan.edges, before);
   edgeStatus.textContent = scan.edges.length
     ? `Original constrained cost ${format(before)} · Select an edge to inspect its plan.`
@@ -373,6 +380,8 @@ function renderEdgeRanking(scan) {
 }
 
 function renderEdgeCombinations(search) {
+  completedSearch = search;
+  saveEdgeSearch.hidden = false;
   const before = search.original.result.constrained.cost;
   const ordinary = search.original.result.ordinary.cost;
   const minimum = search.minimum_edges_to_ordinary;
@@ -380,6 +389,8 @@ function renderEdgeCombinations(search) {
     ? `Ordinary OT costs ${format(ordinary)}. A gap remains after adding every forward edge.`
     : `Within solver tolerance, the fewest added edges to reach ordinary OT (${format(ordinary)}) is ${minimum}.`;
   renderEdgeTable(search.best_additions, before, detail);
+  edgeStudy.hidden = false;
+  edgeStudy.open = true;
   edgeStatus.textContent = `Compared ${search.graphs_evaluated} graph configurations.`;
 }
 
@@ -457,8 +468,10 @@ async function requestRun(message, load, imported = false) {
   status.classList.remove("error");
   clearResult();
   try {
-    const run = await load(active.signal);
+    const saved = await load(active.signal);
     if (request !== active) return;
+    const isSearch = saved.schema === edgeSearchSchema;
+    const run = isSearch ? saved.original : saved;
     if (imported) {
       preset.value = "imported";
       fillInputs(run.input);
@@ -466,7 +479,8 @@ async function requestRun(message, load, imported = false) {
     renderResult(run.result, run.input.model, run.input.operation);
     completedRun = run;
     saveButton.disabled = false;
-    status.textContent = imported ? "Saved run verified." : "";
+    if (isSearch) renderEdgeCombinations(saved);
+    status.textContent = isSearch ? "Saved edge search verified." : imported ? "Saved run verified." : "";
   } catch (error) {
     if (request !== active) return;
     status.textContent = error.message || "GraphWeft could not complete the operation.";
@@ -510,9 +524,11 @@ runFile.addEventListener("change", () => {
     return postRun("/api/replay", await file.text(), signal);
   }, true);
 });
-function downloadRun(run, feedback) {
-  if (!run) return;
-  const file = new Blob([JSON.stringify(run, null, 2) + "\n"], { type: "application/json" });
+function downloadRun(saved, feedback) {
+  if (!saved) return;
+  const isSearch = saved.schema === edgeSearchSchema;
+  const run = isSearch ? saved.original : saved;
+  const file = new Blob([JSON.stringify(saved, null, 2) + "\n"], { type: "application/json" });
   if (file.size > maxRunBytes) {
     feedback.textContent = "This result exceeds the 1 MiB run-file limit.";
     feedback.classList.add("error");
@@ -521,7 +537,8 @@ function downloadRun(run, feedback) {
   const link = element("a");
   const url = URL.createObjectURL(file);
   link.href = url;
-  link.download = `graphweft-${run.input.operation}-${run.manifest.input_sha256.slice(0, 8)}.json`;
+  const kind = isSearch ? "edge-search" : run.input.operation;
+  link.download = `graphweft-${kind}-${run.manifest.input_sha256.slice(0, 8)}.json`;
   document.body.append(link);
   link.click();
   link.remove();
@@ -555,6 +572,7 @@ byId("inspect-edge").addEventListener("click", () => {
   byId("audit-heading").focus();
 });
 byId("save-edge").addEventListener("click", () => downloadRun(expandedRun, edgeStatus));
+saveEdgeSearch.addEventListener("click", () => downloadRun(completedSearch, edgeStatus));
 
 try {
   const response = await fetch("/api/examples");

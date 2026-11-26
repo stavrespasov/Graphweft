@@ -85,7 +85,7 @@ def _same_evidence(expected, claimed):
     return type(expected) is type(claimed) and expected == claimed
 
 
-def _same_audit(audit, claimed, legacy):
+def audit_matches(audit, claimed, legacy=False):
     if legacy and isinstance(claimed, dict) and isinstance(claimed.get("failures"), list):
         recorded = claimed["failures"]
         if len(recorded) == len(audit["failures"]) and all(isinstance(failure, dict) for failure in recorded):
@@ -124,7 +124,7 @@ def _verify_comparison(model, saved, legacy):
                 not costs_match(model, value, recorded[node]) for node, value in by_node.items()
             ):
                 raise ValueError(f"The saved {name} cost breakdown does not match its plan.")
-        if not _same_audit(audit, claim.get("audit"), legacy):
+        if not audit_matches(audit, claim.get("audit"), legacy):
             raise ValueError(f"The saved {name} audit does not match its plan.")
         result[name] = {"plan": plan.tolist(), "cost": cost, "cost_by_node": by_node, "audit": audit}
 
@@ -157,9 +157,18 @@ def verify_run(document):
     else:
         plan = payload["plan"]
         audit = audit_plan(model, plan)
-        if not _same_evidence(plan, saved.get("plan")) or not _same_audit(audit, saved.get("audit"), legacy):
+        if not _same_evidence(plan, saved.get("plan")) or not audit_matches(audit, saved.get("audit"), legacy):
             raise ValueError("The saved audit does not match the supplied plan.")
         result = {"states": states, "plan": plan, "audit": audit}
 
     recorded = {name: manifest[name] for name in ("input_sha256", *versions)}
     return {"schema": RUN_SCHEMA, "input": payload, "result": result, "manifest": recorded}
+
+
+def verify_saved_document(document):
+    # An edge search contains ordinary run documents and uses their verifier.
+    from .edge_study import EDGE_SEARCH_SCHEMA, verify_edge_search
+
+    if isinstance(document, dict) and document.get("schema") == EDGE_SEARCH_SCHEMA:
+        return verify_edge_search(document)
+    return verify_run(document)

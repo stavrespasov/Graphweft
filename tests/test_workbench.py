@@ -136,6 +136,14 @@ class WorkbenchTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(payload)["result"]["constrained"]["cost"], 0.25)
 
+        status, _, payload = self.request("POST", "/api/replay", json.dumps(search), headers)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(payload), search)
+        search["minimum_edges_to_ordinary"] = 1
+        status, _, payload = self.request("POST", "/api/replay", json.dumps(search), headers)
+        self.assertEqual(status, 422)
+        self.assertIn("minimum edges to ordinary", json.loads(payload)["error"])
+
     def test_run_can_be_saved_and_replayed(self):
         model = json.loads((EXAMPLES / "binary_chain.json").read_text())
         headers = {"Content-Type": "application/json"}

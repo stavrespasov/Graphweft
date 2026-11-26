@@ -134,7 +134,16 @@ python -m graphweft search-edges examples/interacting_edges.json --summary
 
 The source uses `D = A XOR B XOR C` and the target uses `D = C`. Together, A → C and B → C let the coupling flip C exactly when A and B differ. This removes mismatches at D and reaches the ordinary optimum of 0.25. [Interacting-edges fixture](examples/interacting_edges.json)
 
-The search keeps the model's node order. It reports the fewest added edges needed to reach the ordinary cost within solver tolerance. When a gap remains after every forward edge is added, the reported minimum is `null`. The three-node fork is an example where the gap remains. At the four-node limit, the search evaluates at most 64 graphs, including the original. Omit `--summary` to get the verifiable runs and cross-graph audits for the winning combinations.
+The search keeps the model's node order. It reports the fewest added edges needed to reach the ordinary cost within solver tolerance. When a gap remains after every forward edge is added, the reported minimum is `null`. The three-node fork is an example where the gap remains. At the four-node limit, the search evaluates at most 64 graphs, including the original.
+
+Choose **Save edge search** to keep the original comparison, a winning plan for each number of additions, and the audits against the original graph. **Open run** verifies the file and restores the search table. Verification reruns the exhaustive search, checks the minimum edge count, and accepts a different winning combination if it attains the same cost within solver tolerance.
+
+The full CLI output is the same versioned report. Use it to verify the entire search, including the claim that two edges are necessary in this example.
+
+```sh
+python -m graphweft search-edges examples/interacting_edges.json > edge-search.json
+python -m graphweft verify-run edge-search.json
+```
 
 ## Method and verification
 

@@ -5,7 +5,7 @@ from itertools import product
 
 from .audit import audit_plan
 from .edge_study import compare_added_edge, scan_added_edges, search_added_edges
-from .experiments import MAX_RUN_BYTES, create_run, verify_run
+from .experiments import MAX_RUN_BYTES, create_run, verify_saved_document
 from .model import Model
 from .transport import compare
 
@@ -168,7 +168,7 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
 
         try:
             if replay:
-                result = verify_run(data)
+                result = verify_saved_document(data)
             elif self.path == "/api/run":
                 result = create_run(data)
             elif self.path == "/api/edge":
