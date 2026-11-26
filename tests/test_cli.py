@@ -7,6 +7,7 @@ import unittest
 
 from graphweft.__main__ import main
 from graphweft.experiments import MAX_RUN_BYTES, create_run
+from graphweft.json_io import MAX_JSON_DEPTH
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
@@ -65,6 +66,20 @@ class CliTests(unittest.TestCase):
             self.assertEqual(code, 2)
             self.assertEqual(stdout, "")
             self.assertIn("1 MiB", stderr)
+
+    def test_document_nesting_has_the_same_boundary_across_python_releases(self):
+        model = b'{"nodes":["A"],"parents":{"A":[]},"source":[1,0],"target":[1,0],"extra":'
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "model.json"
+            for nesting, expected in ((MAX_JSON_DEPTH - 1, 0), (MAX_JSON_DEPTH, 2)):
+                with self.subTest(nesting=nesting):
+                    path.write_bytes(model + b'[' * nesting + b'0' + b']' * nesting + b'}')
+                    code, stdout, stderr = self.run_cli("compare", path)
+                    self.assertEqual(code, expected)
+                    if expected == 0:
+                        self.assertEqual(json.loads(stdout)["cost_gap"], 0)
+                    else:
+                        self.assertIn("nested too deeply", stderr)
 
     def test_invalid_ports_are_rejected_before_opening_a_socket(self):
         for port in ("0", "-1", "65536"):
