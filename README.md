@@ -1,10 +1,18 @@
 # GraphWeft
 
-GraphWeft compares ordinary optimal transport with **graph-bicausal optimal transport** on a supplied directed acyclic graph. It shows how an information constraint changes the lowest transport cost and pinpoints the conditional probabilities that make a plan inadmissible.
+GraphWeft computes ordinary and **graph-bicausal optimal transport** for compatible laws on one to four binary nodes. Given a directed acyclic graph, it returns both optimal couplings and pinpoints the conditional probabilities that make a plan inadmissible.
 
-## Capital Bikeshare case study
+## Reproducible studies
 
-An ordinary plan for working-day versus non-working-day rentals fails the graph audit even though a graph-bicausal plan achieves the same cost. A fuller fit to the same days reveals an evening transport penalty. The study includes both replayable reports and a comparison with AOTNumerics. [Capital Bikeshare case study](studies/bike_sharing/README.md)
+A saved ordinary plan for working-day versus non-working-day Bikeshare rentals achieves the same objective as an admissible plan. In a below-cutoff noon context, it assigns a busy working-day evening 0% probability even though the fitted law requires 45.25%. For comparisons of energy demand or traffic by time of day, a plan audit can reveal when an apparently good match changes the relationships between early and later readings.
+
+| Comparison | Ordinary OT | Graph-bicausal OT | Gap |
+|---|---:|---:|---:|
+| [Capital Bikeshare, first-order fit](studies/bike_sharing/README.md) | 1.514581 | 1.514581 | 0 |
+| [Capital Bikeshare, full-history fit](studies/bike_sharing/full-history-run.json) | 1.514581 | 1.559937 | 0.045356 |
+| [Household appliance energy, full-history fit](studies/appliance_energy/README.md) | 0.292132 | 0.305321 | 0.013190 |
+
+Costs are expected mismatches across three binary time slots. Each study includes data preparation instructions and a saved witness. The [technical note](docs/technical-note.md) gives the mathematical formulation, independent checks, and limits. The [benchmarks](benchmarks/README.md) record runtime and traced allocations over the supported problem sizes.
 
 To reproduce the comparison in the workbench from a fresh checkout, follow the [reviewer walkthrough](studies/bike_sharing/REVIEW.md).
 
@@ -157,7 +165,9 @@ python -m graphweft verify-run edge-search.json
 
 The ordinary solver uses integer min-cost flow. It encodes the input floats as integer weights and uses a common supply and demand total, so the solver preserves small positive masses during optimization. The returned plan uses floating-point probabilities. [NetworkX network simplex](https://networkx.org/documentation/stable/reference/algorithms/generated/networkx.algorithms.flow.network_simplex.html)
 
-For perfect DAGs, where every node's parents form a clique, the constrained solver works backward. It minimizes the local cost plus all downstream terms already assigned to that node. It then adds the minimized cost as a function on the paired parents to the family of the last parent in node order. All those parents fit in that family because they form a clique. The selected kernels reconstruct the plan, including small positive histories. [Kernel characterization and dynamic programming, Propositions 4.7 and 5.2–5.3](https://arxiv.org/html/2608.13716v1)
+A graph-bicausal coupling factors as a product of paired node kernels. Each kernel depends on the source and target parents of that node and must have the two conditional marginals prescribed by the input laws. [Kernel characterization, Proposition 4.7](https://arxiv.org/html/2608.13716v1#S4.Thmtheorem7)
+
+For perfect DAGs, where every node's parents form a clique, the constrained solver works backward. It minimizes the local cost plus all downstream terms already assigned to that node. It then adds the minimized cost as a function on the paired parents to the family of the last parent in node order. All those parents fit in that family because they form a clique. The selected kernels reconstruct the plan, including small positive histories. [Dynamic programming, Propositions 5.2–5.3](https://arxiv.org/html/2608.13716v1#S5.Thmtheorem2)
 
 For other DAGs, the solver searches endpoints of the binary coupling intervals. At each paired parent context, the `(0, 0)` mass fixes the other three entries. Each joint outcome multiplies one kernel entry per node, so the expected cost is affine in each interval coordinate when the others are fixed. A minimum therefore occurs at some combination of endpoints. The search skips unreachable contexts and minimizes the final node's cost independently at each of its parent contexts. The number of combinations can grow exponentially, so the implementation is scoped to four nodes.
 
@@ -174,7 +184,7 @@ python -m unittest discover -s tests -p test_reference_transport.py -v
 
 The test-only reference uses the full coupling matrix as its decision variables. A linear program checks ordinary OT. A mixed-integer program checks graph-bicausal OT by enforcing the prescribed marginals at each paired history. Where histories share a paired parent context, a single binary variable selects a common zero cell of their `2 × 2` kernels. Their fixed marginals then determine the same kernel. An optimum exists at an endpoint in each binary kernel's coupling interval, so the reference can make this restriction while preserving the optimum.
 
-These checks cover 128 seeded cases across all 64 four-node edge patterns in a fixed node order, six examples, and all eight configurations in the interacting-edges search. Generated cases include parent-dependent laws, structural zeros, and asymmetric costs. The reference uses floating-point solvers. The separate rare-state regressions use analytic optima for masses down to `1e-100`.
+These checks cover 128 seeded cases across all 64 four-node edge patterns in a fixed node order, six synthetic fixtures, three real-data comparisons, and all eight configurations in the interacting-edges search. Generated cases include parent-dependent laws, structural zeros, and asymmetric costs. The reference uses floating-point solvers. The separate rare-state regressions use analytic optima for masses down to `1e-100`.
 
 Run the full suite with the same test dependencies.
 

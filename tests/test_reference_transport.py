@@ -8,11 +8,13 @@ import unittest
 import numpy as np
 
 from graphweft.edge_study import search_added_edges
+from graphweft.experiments import verify_saved_document
 from graphweft.model import Model
 from graphweft.transport import compare
 from reference_transport import reference_optima
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
+STUDIES = EXAMPLES.parent / "studies"
 
 
 def _case(nodes, parents, rng, rates):
@@ -79,6 +81,19 @@ class ReferenceTransportTests(unittest.TestCase):
             with self.subTest(filename=filename):
                 specification = json.loads((EXAMPLES / filename).read_text())
                 observed = self.assert_reference_matches(specification)
+                np.testing.assert_allclose(observed, expected, rtol=0, atol=1e-10)
+
+    def test_real_data_reports_match_independent_optima(self):
+        cases = (
+            ("bike_sharing/chain-search.json", (1.514580588494, 1.514580588494)),
+            ("bike_sharing/full-history-run.json", (1.514580588494, 1.559936587201)),
+            ("appliance_energy/full-history-run.json", (0.292131844763, 0.305321454339)),
+        )
+        for filename, expected in cases:
+            with self.subTest(filename=filename):
+                saved = verify_saved_document(json.loads((STUDIES / filename).read_text(encoding="utf-8")))
+                run = saved.get("original", saved)
+                observed = self.assert_reference_matches(run["input"]["model"])
                 np.testing.assert_allclose(observed, expected, rtol=0, atol=1e-10)
 
     def test_interacting_edges_search_matches_reference_over_all_subsets(self):
