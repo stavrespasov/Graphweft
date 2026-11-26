@@ -6,6 +6,8 @@ GraphWeft compares ordinary optimal transport with **graph-bicausal optimal tran
 
 An ordinary plan for working-day versus non-working-day rentals fails the graph audit even though a graph-bicausal plan achieves the same cost. A fuller fit to the same days reveals an evening transport penalty. The study includes both replayable reports and a comparison with AOTNumerics. [Capital Bikeshare case study](studies/bike_sharing/README.md)
 
+To reproduce the comparison in the workbench from a fresh checkout, follow the [reviewer walkthrough](studies/bike_sharing/REVIEW.md).
+
 ## Browser workbench
 
 From the repository root, use Python 3.10 or newer in a virtual environment.
@@ -24,6 +26,8 @@ Select **Save run** after a comparison or audit. The JSON file contains the inpu
 ```sh
 python -m graphweft verify-run path/to/saved-run.json
 ```
+
+Use `python -m graphweft serve --run path/to/saved-run.json` to verify a run or edge-search report before the workbench starts and display it when the page opens.
 
 A verified audit can still report an inadmissible plan. For example, replay verifies that the shared-coin run correctly reports the dependence violation at node C. Run files are limited to 1 MiB.
 

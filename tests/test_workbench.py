@@ -71,6 +71,25 @@ class WorkbenchTests(unittest.TestCase):
             self.assertEqual(examples[key]["model"], json.loads((EXAMPLES / filename).read_text()))
         self.assertEqual(examples["shared-coin"]["plan"], json.loads((EXAMPLES / "shared_coin_plan.json").read_text()))
 
+    def test_startup_returns_examples_and_only_exposes_preloaded_run_locally(self):
+        _, _, examples = self.request("GET", "/api/examples")
+        status, _, payload = self.request("GET", "/api/startup")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(payload), {"examples": json.loads(examples), "initial_run": None})
+
+        model = json.loads((EXAMPLES / "binary_chain.json").read_text())
+        run = create_run({"operation": "compare", "model": model})
+        with self.limited_server(initial_run=run) as server:
+            status, headers, payload = self.request("GET", "/api/startup", server=server)
+            self.assertEqual(status, 200)
+            self.assertEqual(headers["Cache-Control"], "no-store")
+            self.assertEqual(json.loads(payload), {"examples": json.loads(examples), "initial_run": run})
+            status, _, payload = self.request(
+                "GET", "/api/startup", headers={"Origin": "https://example.com"}, server=server,
+            )
+            self.assertEqual(status, 403)
+            self.assertNotIn("initial_run", json.loads(payload))
+
     def test_compare_and_audit_share_the_solver_contract(self):
         status, _, payload = self.request("GET", "/api/examples")
         self.assertEqual(status, 200)
@@ -223,8 +242,8 @@ class WorkbenchTests(unittest.TestCase):
             self.assertEqual(cost, expected)
 
     @contextmanager
-    def limited_server(self, handler=WorkbenchHandler, **limits):
-        with WorkbenchServer(("127.0.0.1", 0), handler, **limits) as server:
+    def limited_server(self, handler=WorkbenchHandler, **options):
+        with WorkbenchServer(("127.0.0.1", 0), handler, **options) as server:
             thread = Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
             thread.start()
             try:

@@ -172,6 +172,8 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/examples":
             self._json(200, demo_examples())
+        elif self.path == "/api/startup":
+            self._json(200, {"examples": demo_examples(), "initial_run": self.server.initial_run})
         elif self.path in _ASSETS:
             filename, content_type = _ASSETS[self.path]
             asset = files("graphweft").joinpath("web").joinpath(filename).read_bytes()
@@ -254,9 +256,13 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
 class WorkbenchServer(ThreadingHTTPServer):
     request_queue_size = _MAX_CONNECTIONS
 
-    def __init__(self, address, handler=WorkbenchHandler, *, max_connections=_MAX_CONNECTIONS, max_solves=_MAX_SOLVES):
+    def __init__(
+        self, address, handler=WorkbenchHandler, *,
+        max_connections=_MAX_CONNECTIONS, max_solves=_MAX_SOLVES, initial_run=None,
+    ):
         self.connection_slots = BoundedSemaphore(max_connections)
         self.solve_slots = BoundedSemaphore(max_solves)
+        self.initial_run = initial_run
         super().__init__(address, handler)
 
     def process_request(self, request, client_address):
@@ -282,10 +288,10 @@ class WorkbenchServer(ThreadingHTTPServer):
             self.connection_slots.release()
 
 
-def serve(port):
+def serve(port, *, initial_run=None):
     if not 1 <= port <= 65535:
         raise ValueError("Port must be between 1 and 65535")
-    with WorkbenchServer(("127.0.0.1", port)) as server:
+    with WorkbenchServer(("127.0.0.1", port), initial_run=initial_run) as server:
         print(f"GraphWeft is listening at http://127.0.0.1:{server.server_port}/", flush=True)
         try:
             server.serve_forever()

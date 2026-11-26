@@ -602,7 +602,8 @@ async function loadExamples() {
   status.textContent = "Loading examples…";
   status.classList.remove("error");
   try {
-    examples = await fetchJson("/api/examples", {}, "GraphWeft could not load its examples.");
+    const startup = await fetchJson("/api/startup", {}, "GraphWeft could not load its examples.");
+    examples = startup.examples;
     preset.replaceChildren(...examples.map((example) => {
       const option = element("option", example.label);
       option.value = example.id;
@@ -614,7 +615,11 @@ async function loadExamples() {
     preset.append(importedOption);
     preset.disabled = false;
     openButton.disabled = false;
-    selectPreset();
+    if (startup.initial_run) {
+      await requestRun("Opening saved run…", async () => startup.initial_run, true);
+    } else {
+      selectPreset();
+    }
   } catch (error) {
     status.textContent = error.message || "GraphWeft could not load its examples.";
     status.classList.add("error");

@@ -4,6 +4,8 @@ For 725 days of Capital Bikeshare data, GraphWeft compares working-day and non-w
 
 ## Open the reports
 
+The [reviewer walkthrough](REVIEW.md) starts with the saved chain report and follows the evidence through both fits.
+
 Start the [local workbench](../../README.md#browser-workbench), choose **Open run**, and load the two files below. In each report, select **Ordinary OT** in **Plan audit**. The chain report restores the search table and its saved alternative graph.
 
 - The first-order report compares the chain with and without the morning-to-evening shortcut. [chain-search.json](chain-search.json)

@@ -6,6 +6,7 @@ import unittest
 
 from playwright.sync_api import expect, sync_playwright
 
+from graphweft.experiments import verify_saved_document
 from graphweft.server import WorkbenchServer
 
 STUDY = Path(__file__).resolve().parents[2] / "studies" / "bike_sharing"
@@ -27,14 +28,18 @@ class WorkbenchBrowserTests(unittest.TestCase):
         cls.browser = getattr(playwright, browser_name).launch(executable_path=os.environ.get("GRAPHWEFT_CHROMIUM"))
         cls.addClassCleanup(cls.browser.close)
 
-    def open_page(self, width=1366, height=900, offline_examples=False):
+    def new_page(self, width=1366, height=900):
         page = self.browser.new_page(viewport={"width": width, "height": height}, accept_downloads=True)
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
         self.addCleanup(page.close)
         self.addCleanup(lambda: self.assertEqual(errors, []))
+        return page
+
+    def open_page(self, width=1366, height=900, offline_examples=False):
+        page = self.new_page(width, height)
         if offline_examples:
-            page.route("**/api/examples", lambda route: route.fulfill(status=503))
+            page.route("**/api/startup", lambda route: route.fulfill(status=503))
         page.goto(self.url)
         if not offline_examples:
             expect(page.locator("#gap")).to_have_text("Cost gap 0.5")
@@ -174,13 +179,46 @@ class WorkbenchBrowserTests(unittest.TestCase):
         expect(page.locator("#edge-study")).to_be_hidden()
         expect(page.get_by_label("Failed condition")).to_contain_text("Node C · History dependence")
 
-    def test_startup_recovers_after_examples_endpoint_returns_an_error(self):
+    def test_startup_recovers_after_loading_fails(self):
         page = self.open_page(offline_examples=True)
         expect(page.locator("#status")).to_have_text("GraphWeft could not load its examples.")
         expect(page.get_by_role("button", name="Run comparison")).to_be_disabled()
-        page.unroute("**/api/examples")
+        page.unroute("**/api/startup")
         page.get_by_role("button", name="Retry loading examples").click()
         expect(page.locator("#gap")).to_have_text("Cost gap 0.5")
+
+    def test_startup_opens_the_verified_bikeshare_search(self):
+        saved = json.loads((STUDY / "chain-search.json").read_text())
+        server = WorkbenchServer(("127.0.0.1", 0), initial_run=verify_saved_document(saved))
+        self.addCleanup(server.server_close)
+        thread = Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join)
+        self.addCleanup(server.shutdown)
+
+        page = self.new_page()
+        page.goto(f"http://127.0.0.1:{server.server_port}")
+        expect(page.locator("#status")).to_have_text("Saved edge search verified.")
+        expect(page.get_by_label("Example")).to_have_value("imported")
+        expect(page.locator(".cost-value")).to_have_text(["1.51458", "1.51458"])
+        search = page.get_by_role("table", name="Best cost by number of added edges")
+        audit = page.get_by_role("group", name="Plan to inspect")
+        audit.get_by_role("button", name="Ordinary OT", exact=True).click()
+        page.get_by_label("Failed condition").select_option(label="5 · Node 18:00 · source conditional marginal")
+        expect(page.locator("#evidence")).to_contain_text("12:00 = (0, 0)")
+        expect(page.locator("#evidence").get_by_role("row", name="1 0 0.45246")).to_be_visible()
+        audit.get_by_role("button", name="Graph-bicausal OT", exact=True).click()
+        expect(page.locator("#audit-status")).to_contain_text("All checks passed")
+        search.get_by_role("button", name="08:00 → 18:00").click()
+        expect(page.locator("#edge-status")).to_contain_text("Both graphs achieve the same cost within solver tolerance.")
+
+        self.open_run(page, STUDY / "full-history-run.json")
+        expect(page.locator("#gap")).to_have_text("Cost gap 0.04536")
+        page.get_by_text("Cost by node", exact=True).click()
+        expect(page.get_by_role("row", name="18:00 0.42332 0.46868 0.04536")).to_be_visible()
+
+        page.get_by_label("Example").select_option("chain")
+        expect(page.locator(".cost-value")).to_have_text(["0.5", "1"])
 
     def test_large_upload_is_rejected_locally_and_valid_study_can_still_open(self):
         page = self.open_page()

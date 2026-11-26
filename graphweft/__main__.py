@@ -39,6 +39,7 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     browser = commands.add_parser("serve", help="open a local browser workbench")
     browser.add_argument("--port", type=int, default=8765, help="loopback port (default: 8765)")
+    browser.add_argument("--run", metavar="FILE", help="verify a saved run or edge search and open it at startup")
     verification = commands.add_parser("verify-run", help="recheck a saved transport run or edge search")
     verification.add_argument("file", help="GraphWeft JSON file")
     for name, help_text in (
@@ -62,7 +63,8 @@ def main(argv=None):
         if args.command == "serve":
             from .server import serve
 
-            serve(args.port)
+            initial_run = verify_saved_document(read_run(args.run)) if args.run is not None else None
+            serve(args.port, initial_run=initial_run)
             return 0
         if args.command == "verify-run":
             run = verify_saved_document(read_run(args.file))
