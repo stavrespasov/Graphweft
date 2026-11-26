@@ -1,12 +1,16 @@
 name: GraphWeft verification
 
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   regression:
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -21,16 +25,47 @@ jobs:
       - run: python -m unittest discover -s tests -v
 
   installed-workbench:
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    env:
+      GRAPHWEFT_BROWSER: ${{ matrix.browser }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - run: python -m pip install '.[browser-test]'
-      - run: python -m playwright install --with-deps chromium
+      - run: python -m playwright install --with-deps "$GRAPHWEFT_BROWSER"
       - name: Exercise the installed package outside the checkout
         working-directory: ${{ runner.temp }}
         run: |
           python -m graphweft compare "$GITHUB_WORKSPACE/examples/binary_chain.json" --summary
           python -m unittest discover -s "$GITHUB_WORKSPACE/tests/browser" -v
+
+  desktop:
+    if: github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install '.[test,browser-test]'
+      - run: python -m unittest discover -s tests -v
+      - run: python -m playwright install chromium
+      - name: Exercise the installed workbench
+        working-directory: ${{ runner.temp }}
+        run: python -m unittest discover -s "$GITHUB_WORKSPACE/tests/browser" -v

@@ -1,7 +1,10 @@
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
+from io import BufferedReader, RawIOBase
 from itertools import product
+from threading import BoundedSemaphore
+from time import monotonic
 
 from .audit import audit_plan
 from .edge_study import compare_added_edge, scan_added_edges, search_added_edges
@@ -11,6 +14,14 @@ from .model import Model
 from .transport import compare
 
 _MAX_BODY_BYTES = 64 * 1024
+_MAX_CONNECTIONS = 16
+_MAX_SOLVES = 4
+_BUSY_BODY = b'{"error":"Too many open workbench connections. Try again shortly."}'
+_BUSY_RESPONSE = (
+    b"HTTP/1.0 503 Service Unavailable\r\nContent-Type: application/json\r\n"
+    b"Connection: close\r\nRetry-After: 1\r\nCache-Control: no-store\r\nContent-Length: "
+    + str(len(_BUSY_BODY)).encode("ascii") + b"\r\n\r\n" + _BUSY_BODY
+)
 _ASSETS = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
@@ -100,15 +111,37 @@ def demo_examples():
     ]
 
 
-class WorkbenchHandler(BaseHTTPRequestHandler):
-    def setup(self):
-        self.request.settimeout(5)
-        super().setup()
+class _DeadlineReader(RawIOBase):
+    def __init__(self, connection, deadline):
+        super().__init__()
+        self.connection = connection
+        self.deadline = deadline
 
-    def _send(self, status, content, content_type):
+    def readable(self):
+        return True
+
+    def readinto(self, buffer):
+        remaining = self.deadline - monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Request input deadline expired")
+        self.connection.settimeout(remaining)
+        return self.connection.recv_into(buffer)
+
+
+class WorkbenchHandler(BaseHTTPRequestHandler):
+    request_timeout = 5
+
+    def setup(self):
+        super().setup()
+        self.rfile.close()
+        self.rfile = BufferedReader(_DeadlineReader(self.connection, monotonic() + self.request_timeout))
+
+    def _send(self, status, content, content_type, retry_after=None):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(content)))
+        if retry_after is not None:
+            self.send_header("Retry-After", str(retry_after))
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Cache-Control", "no-store")
         self.send_header(
@@ -116,14 +149,15 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             "default-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'",
         )
         try:
+            self.connection.settimeout(self.request_timeout)
             self.end_headers()
             self.wfile.write(content)
         except (ConnectionError, TimeoutError):
             self.close_connection = True
 
-    def _json(self, status, body):
+    def _json(self, status, body, retry_after=None):
         payload = json.dumps(body, allow_nan=False, separators=(",", ":")).encode("utf-8")
-        self._send(status, payload, "application/json; charset=utf-8")
+        self._send(status, payload, "application/json; charset=utf-8", retry_after)
 
     def _allow_local(self):
         host = f"127.0.0.1:{self.server.server_port}"
@@ -186,36 +220,72 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             self._json(400, {"error": "Send a valid JSON object."})
             return
 
+        if not self.server.solve_slots.acquire(blocking=False):
+            self._json(503, {"error": "The workbench is busy solving other requests. Try again shortly."}, retry_after=1)
+            return
         try:
-            if replay:
-                result = verify_saved_document(data)
-            elif self.path == "/api/run":
-                result = create_run(data)
-            elif self.path == "/api/edge":
-                result = compare_added_edge(data.get("model"), data.get("parent"), data.get("child"))
-            elif self.path == "/api/edge-scan":
-                result = scan_added_edges(data.get("model"))
-            elif self.path == "/api/edge-search":
-                result = search_added_edges(data.get("model"))
-            else:
-                model = Model.from_dict(data.get("model"))
-                if self.path == "/api/compare":
-                    result = compare(model)
-                else:
-                    plan = data.get("plan")
-                    result = {"states": list(model.states), "plan": plan, "audit": audit_plan(model, plan)}
+            status, result = 200, self._run_operation(data)
         except ValueError as error:
-            self._json(422, {"error": str(error)})
+            status, result = 422, {"error": str(error)}
         except RuntimeError:
-            self._json(500, {"error": "The solver could not return a plan that passed its numerical checks."})
-        else:
-            self._json(200, result)
+            status, result = 500, {"error": "The solver could not return a plan that passed its numerical checks."}
+        finally:
+            self.server.solve_slots.release()
+        self._json(status, result)
+
+    def _run_operation(self, data):
+        if self.path == "/api/replay":
+            return verify_saved_document(data)
+        if self.path == "/api/run":
+            return create_run(data)
+        if self.path == "/api/edge":
+            return compare_added_edge(data.get("model"), data.get("parent"), data.get("child"))
+        if self.path == "/api/edge-scan":
+            return scan_added_edges(data.get("model"))
+        if self.path == "/api/edge-search":
+            return search_added_edges(data.get("model"))
+        model = Model.from_dict(data.get("model"))
+        if self.path == "/api/compare":
+            return compare(model)
+        plan = data.get("plan")
+        return {"states": list(model.states), "plan": plan, "audit": audit_plan(model, plan)}
+
+
+class WorkbenchServer(ThreadingHTTPServer):
+    request_queue_size = _MAX_CONNECTIONS
+
+    def __init__(self, address, handler=WorkbenchHandler, *, max_connections=_MAX_CONNECTIONS, max_solves=_MAX_SOLVES):
+        self.connection_slots = BoundedSemaphore(max_connections)
+        self.solve_slots = BoundedSemaphore(max_solves)
+        super().__init__(address, handler)
+
+    def process_request(self, request, client_address):
+        if not self.connection_slots.acquire(blocking=False):
+            try:
+                request.settimeout(0.1)
+                request.sendall(_BUSY_RESPONSE)
+            except OSError:
+                pass
+            finally:
+                self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self.connection_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.connection_slots.release()
 
 
 def serve(port):
     if not 1 <= port <= 65535:
         raise ValueError("Port must be between 1 and 65535")
-    with ThreadingHTTPServer(("127.0.0.1", port), WorkbenchHandler) as server:
+    with WorkbenchServer(("127.0.0.1", port)) as server:
         print(f"GraphWeft is listening at http://127.0.0.1:{server.server_port}/", flush=True)
         try:
             server.serve_forever()

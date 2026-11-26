@@ -1,4 +1,3 @@
-from http.server import ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
@@ -7,7 +6,7 @@ import unittest
 
 from playwright.sync_api import expect, sync_playwright
 
-from graphweft.server import WorkbenchHandler
+from graphweft.server import WorkbenchServer
 
 STUDY = Path(__file__).resolve().parents[2] / "studies" / "bike_sharing"
 
@@ -15,7 +14,7 @@ STUDY = Path(__file__).resolve().parents[2] / "studies" / "bike_sharing"
 class WorkbenchBrowserTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), WorkbenchHandler)
+        cls.server = WorkbenchServer(("127.0.0.1", 0))
         cls.addClassCleanup(cls.server.server_close)
         thread = Thread(target=cls.server.serve_forever, daemon=True)
         thread.start()
@@ -24,7 +23,8 @@ class WorkbenchBrowserTests(unittest.TestCase):
         cls.url = f"http://127.0.0.1:{cls.server.server_port}"
         playwright = sync_playwright().start()
         cls.addClassCleanup(playwright.stop)
-        cls.browser = playwright.chromium.launch(executable_path=os.environ.get("GRAPHWEFT_CHROMIUM"))
+        browser_name = os.environ.get("GRAPHWEFT_BROWSER", "chromium")
+        cls.browser = getattr(playwright, browser_name).launch(executable_path=os.environ.get("GRAPHWEFT_CHROMIUM"))
         cls.addClassCleanup(cls.browser.close)
 
     def open_page(self, width=1366, height=900, offline_examples=False):
@@ -116,10 +116,37 @@ class WorkbenchBrowserTests(unittest.TestCase):
                 expect(page.locator("#results")).to_be_hidden()
                 expect(submit).to_be_enabled()
         editor.fill(original)
-        page.route("**/api/run", lambda route: route.fulfill(status=500, json={"error": "Solver stopped."}))
+        for code, message in ((500, "Solver stopped."), (503, "The workbench is busy. Try again shortly.")):
+            with self.subTest(status=code):
+                page.route("**/api/run", lambda route: route.fulfill(status=code, json={"error": message}))
+                submit.click()
+                expect(page.locator("#status")).to_have_text(message)
+                expect(submit).to_be_enabled()
+                expect(editor).to_have_value(original)
+                page.unroute("**/api/run")
         submit.click()
-        expect(page.locator("#status")).to_have_text("Solver stopped.")
-        page.unroute("**/api/run")
+        expect(page.locator("#gap")).to_have_text("Cost gap 0.5")
+
+    def test_stalled_response_body_times_out_and_allows_a_retry(self):
+        page = self.open_page()
+        page.evaluate("""() => {
+            const nativeTimeout = AbortSignal.timeout;
+            AbortSignal.timeout = () => {
+                AbortSignal.timeout = nativeTimeout;
+                return nativeTimeout(100);
+            };
+            const original = window.fetch;
+            window.fetch = (path, options) => {
+                window.fetch = original;
+                return Promise.resolve({ok: true, json: () => new Promise((_, reject) => {
+                    options.signal.addEventListener('abort', () => reject(options.signal.reason), {once: true});
+                })});
+            };
+        }""")
+        submit = page.get_by_role("button", name="Run comparison")
+        submit.click()
+        expect(page.locator("#status")).to_have_text("The local workbench timed out. Try again.")
+        expect(submit).to_be_enabled()
         submit.click()
         expect(page.locator("#gap")).to_have_text("Cost gap 0.5")
 
@@ -152,7 +179,7 @@ class WorkbenchBrowserTests(unittest.TestCase):
         expect(page.locator("#status")).to_have_text("GraphWeft could not load its examples.")
         expect(page.get_by_role("button", name="Run comparison")).to_be_disabled()
         page.unroute("**/api/examples")
-        page.reload()
+        page.get_by_role("button", name="Retry loading examples").click()
         expect(page.locator("#gap")).to_have_text("Cost gap 0.5")
 
     def test_large_upload_is_rejected_locally_and_valid_study_can_still_open(self):

@@ -54,6 +54,7 @@ button:disabled, select:disabled { opacity: .55; cursor: wait; }
 .graph ul { list-style: none; padding: 0; margin: .5rem 0 0; font: .82rem/1.75 var(--mono); overflow-wrap: anywhere; }
 #status:not(:empty) { margin-bottom: .7rem; color: var(--muted); }
 #status.error { padding: .7rem .8rem; color: var(--red); background: var(--soft-red); border: 1px solid #cead9c; }
+#retry-examples { margin-bottom: .7rem; background: var(--surface); color: var(--blue-dark); }
 .section { padding: clamp(.85rem, 1.8vw, 1.35rem); margin-bottom: .9rem; }
 .section-heading { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: .55rem .85rem; margin-bottom: .85rem; }
 .section-heading p { color: var(--muted); font-size: .85rem; margin-top: .18rem; }

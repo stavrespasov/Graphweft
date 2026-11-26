@@ -1,16 +1,17 @@
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from email.message import Message
 import json
 import unittest
 from http.client import HTTPConnection, HTTPResponse
-from http.server import ThreadingHTTPServer
 from pathlib import Path
+from queue import Queue
 from socket import SHUT_WR, create_connection
-from threading import Thread
+from threading import Event, Thread
 from unittest.mock import Mock, patch
 
-from graphweft.experiments import MAX_RUN_BYTES
-from graphweft.server import WorkbenchHandler
+from graphweft.experiments import MAX_RUN_BYTES, create_run
+from graphweft.server import WorkbenchHandler, WorkbenchServer, _DeadlineReader
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 JSON_HEADER = {"Content-Type": "application/json"}
@@ -19,7 +20,7 @@ JSON_HEADER = {"Content-Type": "application/json"}
 class WorkbenchTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), WorkbenchHandler)
+        cls.server = WorkbenchServer(("127.0.0.1", 0))
         cls.thread = Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
 
@@ -29,12 +30,12 @@ class WorkbenchTests(unittest.TestCase):
         cls.server.server_close()
         cls.thread.join()
 
-    def request(self, method, path, body=None, headers=None):
-        connection = HTTPConnection("127.0.0.1", self.server.server_port, timeout=5)
+    def request(self, method, path, body=None, headers=None, server=None):
+        connection = HTTPConnection("127.0.0.1", (server or self.server).server_port, timeout=5)
         try:
             connection.request(method, path, body=body, headers=headers or {})
             response = connection.getresponse()
-            return response.status, response.getheader("Content-Type"), response.read()
+            return response.status, response.headers, response.read()
         finally:
             connection.close()
 
@@ -53,9 +54,9 @@ class WorkbenchTests(unittest.TestCase):
         for path, expected_type in (
             ("/", "text/html"), ("/app.js", "text/javascript"), ("/styles.css", "text/css")
         ):
-            status, content_type, payload = self.request("GET", path)
+            status, headers, payload = self.request("GET", path)
             self.assertEqual(status, 200)
-            self.assertTrue(content_type.startswith(expected_type))
+            self.assertTrue(headers["Content-Type"].startswith(expected_type))
             self.assertGreater(len(payload), 100)
         status, _, payload = self.request("GET", "/api/examples")
         self.assertEqual(status, 200)
@@ -138,19 +139,28 @@ class WorkbenchTests(unittest.TestCase):
         self.assertEqual(status, 413)
 
     def test_stalled_request_body_times_out(self):
-        def short_setup(handler):
-            original_setup(handler)
-            handler.request.settimeout(0.2)
-
-        original_setup = WorkbenchHandler.setup
-        with patch.object(WorkbenchHandler, "setup", short_setup):
+        with patch.object(WorkbenchHandler, "request_timeout", 0.25):
             status, payload = self.framed_request("Content-Length: 12\r\n", b"{}", finish=False)
         self.assertEqual(status, 408)
         self.assertIn("Timed out", payload["error"])
 
+    def test_progress_does_not_extend_the_input_deadline(self):
+        connection = Mock()
+        connection.recv_into.return_value = 1
+        reader = _DeadlineReader(connection, deadline=2.0)
+        buffer = bytearray(8)
+        with patch("graphweft.server.monotonic", side_effect=[0.5, 1.5, 2.1]):
+            self.assertEqual(reader.readinto(buffer), 1)
+            self.assertEqual(reader.readinto(buffer), 1)
+            with self.assertRaises(TimeoutError):
+                reader.readinto(buffer)
+        self.assertEqual(connection.recv_into.call_count, 2)
+        self.assertEqual([call.args[0] for call in connection.settimeout.call_args_list], [1.5, 0.5])
+
     def test_disconnected_client_abandons_response(self):
         handler = object.__new__(WorkbenchHandler)
         handler.send_response, handler.send_header, handler.end_headers = Mock(), Mock(), Mock()
+        handler.connection = Mock()
         handler.wfile = Mock()
         handler.wfile.write.side_effect = BrokenPipeError
         handler._send(200, b"{}", "application/json")
@@ -205,12 +215,89 @@ class WorkbenchTests(unittest.TestCase):
             result = json.loads(payload)
             return status, result["input"]["model"] == model, result["result"]["constrained"]["cost"], expected
 
-        with ThreadPoolExecutor(max_workers=6) as workers:
+        with ThreadPoolExecutor(max_workers=4) as workers:
             results = list(workers.map(run, fixtures * 2))
         for status, same_input, cost, expected in results:
             self.assertEqual(status, 200)
             self.assertTrue(same_input)
             self.assertEqual(cost, expected)
+
+    @contextmanager
+    def limited_server(self, handler=WorkbenchHandler, **limits):
+        with WorkbenchServer(("127.0.0.1", 0), handler, **limits) as server:
+            thread = Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+            thread.start()
+            try:
+                yield server
+            finally:
+                server.shutdown()
+                thread.join()
+
+    def test_stalled_connection_releases_capacity_after_its_deadline(self):
+        admitted = Event()
+        released = Event()
+
+        class LimitedHandler(WorkbenchHandler):
+            request_timeout = 0.75
+
+            def setup(self):
+                super().setup()
+                admitted.set()
+
+            def finish(self):
+                super().finish()
+                released.set()
+
+        with self.limited_server(LimitedHandler, max_connections=1, max_solves=1) as server:
+            with create_connection(("127.0.0.1", server.server_port), timeout=3):
+                self.assertTrue(admitted.wait(3))
+                with create_connection(("127.0.0.1", server.server_port), timeout=3) as refused:
+                    with HTTPResponse(refused) as response:
+                        response.begin()
+                        self.assertEqual(response.status, 503)
+                        self.assertEqual(response.headers["Retry-After"], "1")
+                        self.assertIn("Too many open", json.loads(response.read())["error"])
+                self.assertTrue(released.wait(3))
+            # The connection semaphore is released after the handler's finish and socket close.
+            self.assertTrue(server.connection_slots.acquire(timeout=3))
+            server.connection_slots.release()
+            status, _, _ = self.request("GET", "/api/examples", server=server)
+            self.assertEqual(status, 200)
+
+    def test_solver_saturation_keeps_assets_available_and_retries_work(self):
+        model = json.loads((EXAMPLES / "binary_chain.json").read_text())
+        body = json.dumps({"operation": "compare", "model": model})
+        started = Queue()
+        release = Event()
+
+        def paused_solve(data):
+            started.put(None)
+            if not release.wait(5):
+                raise RuntimeError("Test did not release the solver")
+            return create_run(data)
+
+        with self.limited_server(max_solves=2) as server, ThreadPoolExecutor(max_workers=4) as workers:
+            def run():
+                return self.request("POST", "/api/run", body, JSON_HEADER, server=server)
+
+            with patch("graphweft.server.create_run", side_effect=paused_solve):
+                for _ in range(3):
+                    release.clear()
+                    active = [workers.submit(run) for _ in range(2)]
+                    try:
+                        for _ in active:
+                            started.get(timeout=3)
+                        for _ in range(4):
+                            status, headers, payload = run()
+                            self.assertEqual(status, 503)
+                            self.assertEqual(headers["Retry-After"], "1")
+                            self.assertIn("busy solving", json.loads(payload)["error"])
+                        status, _, _ = self.request("GET", "/api/examples", server=server)
+                        self.assertEqual(status, 200)
+                    finally:
+                        release.set()
+                    self.assertEqual([future.result()[0] for future in active], [200, 200])
+            self.assertEqual(run()[0], 200)
 
     def test_edge_comparison_returns_the_cross_audit_and_expanded_run(self):
         model = json.loads((EXAMPLES / "binary_collider.json").read_text())

@@ -8,6 +8,7 @@ const openButton = byId("open-run");
 const saveButton = byId("save-run");
 const runFile = byId("run-file");
 const status = byId("status");
+const retryExamples = byId("retry-examples");
 const results = byId("results");
 const findings = byId("finding");
 const auditOptions = byId("audit-options");
@@ -30,6 +31,7 @@ const labels = {
 };
 const numberFormat = new Intl.NumberFormat("en", { maximumFractionDigits: 5 });
 const maxRunBytes = 1024 * 1024;
+const requestTimeoutMs = 30_000;
 const edgeSearchSchema = "graphweft.edge-search/1";
 let examples = [];
 let request;
@@ -298,16 +300,35 @@ function clearResult() {
   byId("graph").hidden = true;
 }
 
-async function postRun(path, body, signal) {
-  const response = await fetch(path, {
+async function fetchJson(path, options, fallback) {
+  const timeout = AbortSignal.timeout(requestTimeoutMs);
+  const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+  try {
+    const response = await fetch(path, { ...options, signal });
+    if (!response.ok) {
+      const isJson = response.headers.get("Content-Type")?.includes("application/json");
+      const data = isJson ? await response.json() : null;
+      throw new Error(data?.error || fallback);
+    }
+    return await response.json();
+  } catch (error) {
+    if (timeout.aborted && !options.signal?.aborted) {
+      throw new Error("The local workbench timed out. Try again.");
+    }
+    if (error instanceof TypeError && !signal.aborted) {
+      throw new Error("Could not reach the local workbench. Check that GraphWeft is running and try again.");
+    }
+    throw error;
+  }
+}
+
+function postRun(path, body, signal) {
+  return fetchJson(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body,
     signal,
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error);
-  return data;
+  }, "GraphWeft could not complete the operation.");
 }
 
 function configureEdgeStudy(model) {
@@ -576,23 +597,30 @@ byId("inspect-edge").addEventListener("click", () => {
 byId("save-edge").addEventListener("click", () => downloadRun(expandedRun, edgeStatus));
 saveEdgeSearch.addEventListener("click", () => downloadRun(completedSearch, edgeStatus));
 
-try {
-  const response = await fetch("/api/examples");
-  if (!response.ok) throw new Error("GraphWeft could not load its examples.");
-  examples = await response.json();
-  for (const example of examples) {
-    const option = element("option", example.label);
-    option.value = example.id;
-    preset.append(option);
+async function loadExamples() {
+  retryExamples.hidden = true;
+  status.textContent = "Loading examples…";
+  status.classList.remove("error");
+  try {
+    examples = await fetchJson("/api/examples", {}, "GraphWeft could not load its examples.");
+    preset.replaceChildren(...examples.map((example) => {
+      const option = element("option", example.label);
+      option.value = example.id;
+      return option;
+    }));
+    const importedOption = element("option", "Imported run");
+    importedOption.value = "imported";
+    importedOption.hidden = true;
+    preset.append(importedOption);
+    preset.disabled = false;
+    openButton.disabled = false;
+    selectPreset();
+  } catch (error) {
+    status.textContent = error.message || "GraphWeft could not load its examples.";
+    status.classList.add("error");
+    retryExamples.hidden = false;
   }
-  const importedOption = element("option", "Imported run");
-  importedOption.value = "imported";
-  importedOption.hidden = true;
-  preset.append(importedOption);
-  preset.disabled = false;
-  openButton.disabled = false;
-  selectPreset();
-} catch (error) {
-  status.textContent = error.message || "GraphWeft could not load its examples.";
-  status.classList.add("error");
 }
+
+retryExamples.addEventListener("click", () => void loadExamples());
+await loadExamples();
