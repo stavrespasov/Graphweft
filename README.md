@@ -18,7 +18,7 @@ To reproduce the comparison in the workbench from a fresh checkout, follow the [
 
 ## Browser workbench
 
-From the repository root, use Python 3.10 or newer in a virtual environment.
+From a repository checkout or extracted source distribution, use Python 3.10 or newer in a virtual environment.
 
 ```sh
 python -m pip install -e .

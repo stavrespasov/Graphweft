@@ -2,6 +2,8 @@ cff-version: 1.2.0
 message: "If you use GraphWeft in your research, please cite this software."
 title: GraphWeft
 type: software
+version: "0.1.0"
+abstract: "GraphWeft computes ordinary and graph-bicausal optimal transport on finite binary directed acyclic graphs and audits the conditional distributions of candidate couplings."
 authors:
   - given-names: Stavre
     family-names: Spasov

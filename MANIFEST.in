@@ -1,0 +1,6 @@
+include CITATION.cff
+recursive-include benchmarks *.md *.py
+recursive-include docs *.md
+recursive-include examples *.json
+recursive-include studies *.json *.md *.py
+recursive-include tests *.py
