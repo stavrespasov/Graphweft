@@ -1,5 +1,5 @@
 import json
-from itertools import product
+from itertools import combinations, product
 from math import prod
 from pathlib import Path
 from random import Random
@@ -7,6 +7,7 @@ import unittest
 
 import numpy as np
 
+from graphweft.edge_study import search_added_edges
 from graphweft.model import Model
 from graphweft.transport import compare
 from reference_transport import reference_optima
@@ -79,3 +80,27 @@ class ReferenceTransportTests(unittest.TestCase):
                 specification = json.loads((EXAMPLES / filename).read_text())
                 observed = self.assert_reference_matches(specification)
                 np.testing.assert_allclose(observed, expected, rtol=0, atol=1e-10)
+
+    def test_interacting_edges_search_matches_reference_over_all_subsets(self):
+        specification = json.loads((EXAMPLES / "interacting_edges.json").read_text())
+        candidates = (("A", "B"), ("A", "C"), ("B", "C"))
+        reference_by_count = []
+        for count in range(len(candidates) + 1):
+            costs = []
+            for added in combinations(candidates, count):
+                parents = {node: past[:] for node, past in specification["parents"].items()}
+                for parent, child in added:
+                    parents[child].append(parent)
+                size = 2 ** (len(parents["C"]) + 1)
+                # The fixture charges 0.5 for a mismatch at C in every parent context.
+                factor = [[0.5 if x % 2 != y % 2 else 0 for y in range(size)] for x in range(size)]
+                expanded = {**specification, "parents": parents, "cost_factors": {"C": factor}}
+                ordinary, constrained, _ = reference_optima(expanded)
+                self.assertAlmostEqual(ordinary, 0.25)
+                costs.append(constrained)
+            reference_by_count.append(min(costs))
+
+        result = search_added_edges(specification)
+        actual = [result["original"]["result"]["constrained"]["cost"]]
+        actual.extend(study["expanded"]["result"]["constrained"]["cost"] for study in result["best_additions"])
+        np.testing.assert_allclose(actual, reference_by_count, rtol=0, atol=1e-10)

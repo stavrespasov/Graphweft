@@ -48,6 +48,7 @@ class WorkbenchTests(unittest.TestCase):
                               ("collider", "binary_collider.json"),
                               ("ordered-control", "ordered_control.json"),
                               ("four-node-collider", "four_node_collider.json"),
+                              ("interacting-edges", "interacting_edges.json"),
                               ("shared-coin", "shared_coin_model.json")):
             self.assertEqual(examples[key]["model"], json.loads((EXAMPLES / filename).read_text()))
         self.assertEqual(examples["shared-coin"]["plan"], json.loads((EXAMPLES / "shared_coin_plan.json").read_text()))
@@ -118,6 +119,20 @@ class WorkbenchTests(unittest.TestCase):
         best = scan["edges"][0]
         self.assertEqual(best["original_graph_audit"]["failures"][0]["node"], "C")
         status, _, payload = self.request("POST", "/api/replay", json.dumps(best["expanded"]), headers)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(payload)["result"]["constrained"]["cost"], 0.25)
+
+    def test_edge_search_returns_a_verifiable_combination(self):
+        model = json.loads((EXAMPLES / "interacting_edges.json").read_text())
+        headers = {"Content-Type": "application/json"}
+        status, _, payload = self.request("POST", "/api/edge-search", json.dumps({"model": model}), headers)
+        self.assertEqual(status, 200)
+        search = json.loads(payload)
+        self.assertEqual(search["graphs_evaluated"], 8)
+        self.assertEqual(search["minimum_edges_to_ordinary"], 2)
+        run = search["best_additions"][1]["expanded"]
+        self.assertEqual(run["input"]["model"]["parents"]["C"], ["A", "B"])
+        status, _, payload = self.request("POST", "/api/replay", json.dumps(run), headers)
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(payload)["result"]["constrained"]["cost"], 0.25)
 

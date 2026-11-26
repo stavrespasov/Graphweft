@@ -74,18 +74,20 @@
 
           <details id="edge-study" class="section edge-study" hidden>
             <summary>Compare an added edge</summary>
-            <p>Keep the source law, target law, and cost fixed while adding an edge to the current result.</p>
+            <p>Keep the source law, target law, and cost fixed while adding edges to the current graph.</p>
             <form id="edge-form" class="edge-form">
               <label class="field">Edge to add <select id="edge-choice"></select></label>
               <button type="submit" id="compare-edge">Compare edge</button>
               <button type="button" id="scan-edges">Compare all edges</button>
+              <button type="button" id="search-edges">Compare edge combinations</button>
             </form>
             <p id="edge-status" class="edge-status" role="status"></p>
             <div id="edge-ranking" class="cost-breakdown edge-ranking" hidden>
-              <table aria-label="Added edges ranked by cost decrease">
+              <p id="edge-ranking-summary"></p>
+              <table id="edge-table" aria-label="Added edges ranked by cost decrease">
                 <thead><tr>
-                  <th scope="col">Added edge</th><th scope="col">Constrained cost</th>
-                  <th scope="col" aria-sort="descending">Cost decrease</th>
+                  <th scope="col">Added edges</th><th scope="col">Constrained cost</th>
+                  <th scope="col" id="edge-decrease-order">Cost decrease</th>
                 </tr></thead>
                 <tbody id="edge-rows"></tbody>
               </table>

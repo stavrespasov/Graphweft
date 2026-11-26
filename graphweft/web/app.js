@@ -15,6 +15,8 @@ const edgeStudy = byId("edge-study");
 const edgeChoice = byId("edge-choice");
 const edgeButton = byId("compare-edge");
 const scanButton = byId("scan-edges");
+const searchButton = byId("search-edges");
+const edgeActions = [edgeButton, scanButton, searchButton];
 const edgeStatus = byId("edge-status");
 const edgeResult = byId("edge-result");
 const edgeRanking = byId("edge-ranking");
@@ -319,8 +321,7 @@ function clearEdgeResult() {
   edgeRequest?.abort();
   edgeRequest = undefined;
   expandedRun = undefined;
-  edgeButton.disabled = false;
-  scanButton.disabled = false;
+  for (const action of edgeActions) action.disabled = false;
   edgeResult.hidden = true;
   edgeStatus.textContent = "";
   edgeStatus.classList.remove("error");
@@ -334,7 +335,8 @@ function clearEdgeResult() {
 
 function renderEdgeResult(study, before) {
   const after = study.expanded.result.constrained.cost;
-  byId("edge-heading").textContent = study.edge.join(" → ");
+  const added = study.added_edges ?? [study.edge];
+  byId("edge-heading").textContent = added.map((edge) => edge.join(" → ")).join(", ");
   byId("edge-costs").replaceChildren(...[
     ["Original constrained cost", before],
     ["Expanded constrained cost", after],
@@ -355,7 +357,7 @@ function renderEdgeResult(study, before) {
   edgeStatus.textContent = study.cost_decrease === 0
     ? `Both graphs achieve the same cost within solver tolerance. ${auditSummary}`
     : auditSummary;
-  const selectedEdge = JSON.stringify(study.edge);
+  const selectedEdge = JSON.stringify(added);
   for (const choice of edgeRows.querySelectorAll("button")) {
     choice.setAttribute("aria-pressed", String(choice.dataset.edge === selectedEdge));
   }
@@ -364,18 +366,47 @@ function renderEdgeResult(study, before) {
 
 function renderEdgeRanking(scan) {
   const before = scan.original.result.constrained.cost;
-  edgeRows.replaceChildren(...scan.edges.map((study) => {
+  renderEdgeTable(scan.edges, before);
+  edgeStatus.textContent = scan.edges.length
+    ? `Original constrained cost ${format(before)} · Select an edge to inspect its plan.`
+    : "The graph already contains every forward edge.";
+}
+
+function renderEdgeCombinations(search) {
+  const before = search.original.result.constrained.cost;
+  const ordinary = search.original.result.ordinary.cost;
+  const minimum = search.minimum_edges_to_ordinary;
+  const detail = minimum === null
+    ? `Ordinary OT costs ${format(ordinary)}. A gap remains after adding every forward edge.`
+    : `Within solver tolerance, the fewest added edges to reach ordinary OT (${format(ordinary)}) is ${minimum}.`;
+  renderEdgeTable(search.best_additions, before, detail);
+  edgeStatus.textContent = `Compared ${search.graphs_evaluated} graph configurations.`;
+}
+
+function renderEdgeTable(studies, before, combinationSummary = "") {
+  const table = byId("edge-table");
+  const ordering = byId("edge-decrease-order");
+  byId("edge-ranking-summary").textContent = combinationSummary;
+  if (combinationSummary) {
+    table.setAttribute("aria-label", "Best cost by number of added edges");
+    ordering.removeAttribute("aria-sort");
+  } else {
+    table.setAttribute("aria-label", "Added edges ranked by cost decrease");
+    ordering.setAttribute("aria-sort", "descending");
+  }
+  const rows = studies.map((study) => {
+    const added = study.added_edges ?? [study.edge];
     const row = element("tr");
     const header = element("th");
     header.scope = "row";
-    const choice = element("button", study.edge.join(" → "));
+    const choice = element("button", added.map((edge) => edge.join(" → ")).join(", "));
     choice.type = "button";
-    choice.dataset.edge = JSON.stringify(study.edge);
+    choice.dataset.edge = JSON.stringify(added);
     choice.setAttribute("aria-controls", "edge-result");
     choice.setAttribute("aria-pressed", "false");
     choice.addEventListener("click", () => {
       clearEdgeResult();
-      edgeChoice.value = choice.dataset.edge;
+      if (added.length === 1) edgeChoice.value = JSON.stringify(added[0]);
       renderEdgeResult(study, before);
       byId("edge-heading").focus();
     });
@@ -383,11 +414,16 @@ function renderEdgeRanking(scan) {
     row.append(header, element("td", format(study.expanded.result.constrained.cost)),
       element("td", format(study.cost_decrease)));
     return row;
-  }));
-  edgeStatus.textContent = scan.edges.length
-    ? `Original constrained cost ${format(before)} · Select an edge to inspect its plan.`
-    : "The graph already contains every forward edge.";
-  edgeRanking.hidden = scan.edges.length === 0;
+  });
+  if (combinationSummary) {
+    const baseline = element("tr");
+    const header = element("th", "Original graph");
+    header.scope = "row";
+    baseline.append(header, element("td", format(before)), element("td", "0"));
+    rows.unshift(baseline);
+  }
+  edgeRows.replaceChildren(...rows);
+  edgeRanking.hidden = rows.length === 0;
 }
 
 async function requestEdge(path, parameters, message, render) {
@@ -395,8 +431,7 @@ async function requestEdge(path, parameters, message, render) {
   const payload = { model: completedRun.input.model, ...parameters };
   const active = new AbortController();
   edgeRequest = active;
-  edgeButton.disabled = true;
-  scanButton.disabled = true;
+  for (const action of edgeActions) action.disabled = true;
   edgeStatus.textContent = message;
   try {
     const result = await postRun(path, JSON.stringify(payload), active.signal);
@@ -408,8 +443,7 @@ async function requestEdge(path, parameters, message, render) {
   } finally {
     if (edgeRequest === active) {
       edgeRequest = undefined;
-      edgeButton.disabled = false;
-      scanButton.disabled = false;
+      for (const action of edgeActions) action.disabled = false;
     }
   }
 }
@@ -509,6 +543,12 @@ scanButton.addEventListener("click", () => {
   edgeRanking.hidden = true;
   edgeRows.replaceChildren();
   void requestEdge("/api/edge-scan", {}, "Comparing all missing forward edges…", renderEdgeRanking);
+});
+searchButton.addEventListener("click", () => {
+  if (!completedRun) return;
+  edgeRanking.hidden = true;
+  edgeRows.replaceChildren();
+  void requestEdge("/api/edge-search", {}, "Comparing edge combinations…", renderEdgeCombinations);
 });
 byId("inspect-edge").addEventListener("click", () => {
   inspect("expanded");

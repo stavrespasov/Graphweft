@@ -117,6 +117,25 @@ python -m graphweft scan-edges examples/four_node_collider.json --summary
 
 Omit `--summary` for the original run and each candidate's expanded run and cross-graph audit. A graph that already contains every forward edge returns an empty list.
 
+### Compare edge combinations
+
+Select **Interacting edges**, open **Compare an added edge**, and choose **Compare edge combinations**. GraphWeft searches every subset of missing forward edges and shows one cheapest graph for each number of additions. Select a result to audit its plan against the original graph or save the expanded run.
+
+```sh
+python -m graphweft search-edges examples/interacting_edges.json --summary
+```
+
+| Number of added edges | Best constrained cost | Cost decrease |
+|---:|---:|---:|
+| 0 | 0.50 | 0 |
+| 1 | 0.50 | 0 |
+| 2 | 0.25 | 0.25 |
+| 3 | 0.25 | 0.25 |
+
+The source uses `D = A XOR B XOR C` and the target uses `D = C`. Together, A → C and B → C let the coupling flip C exactly when A and B differ. This removes mismatches at D and reaches the ordinary optimum of 0.25. [Interacting-edges fixture](examples/interacting_edges.json)
+
+The search keeps the model's node order. It reports the fewest added edges needed to reach the ordinary cost within solver tolerance. When a gap remains after every forward edge is added, the reported minimum is `null`. The three-node fork is an example where the gap remains. At the four-node limit, the search evaluates at most 64 graphs, including the original. Omit `--summary` to get the verifiable runs and cross-graph audits for the winning combinations.
+
 ## Method and verification
 
 The ordinary solver uses integer min-cost flow. It encodes the input floats as integer weights and uses a common supply and demand total, so the solver preserves small positive masses during optimization. The returned plan uses floating-point probabilities. [NetworkX network simplex](https://networkx.org/documentation/stable/reference/algorithms/generated/networkx.algorithms.flow.network_simplex.html)
@@ -138,7 +157,7 @@ python -m unittest discover -s tests -p test_reference_transport.py -v
 
 The test-only reference uses the full coupling matrix as its decision variables. A linear program checks ordinary OT. A mixed-integer program checks graph-bicausal OT by enforcing the prescribed marginals at each paired history. Where histories share a paired parent context, a single binary variable selects a common zero cell of their `2 × 2` kernels. Their fixed marginals then determine the same kernel. An optimum exists at an endpoint in each binary kernel's coupling interval, so the reference can make this restriction while preserving the optimum.
 
-These checks cover 128 seeded cases across all 64 four-node edge patterns in a fixed node order, plus six examples. Generated cases include parent-dependent laws, structural zeros, and asymmetric costs. The reference uses floating-point solvers. The separate rare-state regressions use analytic optima for masses down to `1e-100`.
+These checks cover 128 seeded cases across all 64 four-node edge patterns in a fixed node order, six examples, and all eight configurations in the interacting-edges search. Generated cases include parent-dependent laws, structural zeros, and asymmetric costs. The reference uses floating-point solvers. The separate rare-state regressions use analytic optima for masses down to `1e-100`.
 
 Run the full suite with the same test dependencies.
 

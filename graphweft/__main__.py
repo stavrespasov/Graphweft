@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 from .audit import audit_plan
-from .edge_study import compare_added_edge, scan_added_edges
+from .edge_study import compare_added_edge, scan_added_edges, search_added_edges
 from .experiments import MAX_RUN_BYTES, verify_run
 from .model import Model
 from .transport import compare
@@ -47,6 +47,7 @@ def main(argv=None):
         ("compare", "solve ordinary and graph-bicausal transport"),
         ("compare-edge", "compare transport before and after adding a forward edge"),
         ("scan-edges", "rank all missing forward edges by their effect on transport cost"),
+        ("search-edges", "find the best combination for each number of added edges"),
         ("audit", "test a supplied coupling against the graph"),
     ):
         subparser = commands.add_parser(name, help=help_text)
@@ -106,6 +107,24 @@ def main(argv=None):
                         }
                         for study in result["edges"]
                     ],
+                }
+            print(json.dumps(result, indent=2, allow_nan=False))
+            return 0
+        if args.command == "search-edges":
+            result = search_added_edges(specification)
+            if args.summary:
+                original = result["original"]["result"]
+                rows = [{"added_edges": [], "constrained_cost": original["constrained"]["cost"], "cost_decrease": 0.0}]
+                rows.extend({
+                    "added_edges": study["added_edges"],
+                    "constrained_cost": study["expanded"]["result"]["constrained"]["cost"],
+                    "cost_decrease": study["cost_decrease"],
+                } for study in result["best_additions"])
+                result = {
+                    "graphs_evaluated": result["graphs_evaluated"],
+                    "ordinary_cost": original["ordinary"]["cost"],
+                    "minimum_edges_to_ordinary": result["minimum_edges_to_ordinary"],
+                    "best_by_edge_count": rows,
                 }
             print(json.dumps(result, indent=2, allow_nan=False))
             return 0

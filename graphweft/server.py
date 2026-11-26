@@ -4,7 +4,7 @@ from importlib.resources import files
 from itertools import product
 
 from .audit import audit_plan
-from .edge_study import compare_added_edge, scan_added_edges
+from .edge_study import compare_added_edge, scan_added_edges, search_added_edges
 from .experiments import MAX_RUN_BYTES, create_run, verify_run
 from .model import Model
 from .transport import compare
@@ -79,6 +79,16 @@ def demo_examples():
             },
         },
         {
+            "id": "interacting-edges", "label": "Interacting edges", "operation": "compare",
+            "model": {
+                "nodes": [*fork_nodes, "D"],
+                "parents": {"A": [], "B": [], "C": [], "D": ["A", "B", "C"]},
+                "source": [0.125 if d == a ^ b ^ c else 0 for a, b, c, d in product((0, 1), repeat=4)],
+                "target": [0.125 if d == c else 0 for _, _, c, d in product((0, 1), repeat=4)],
+                "cost_factors": {"C": [[0, 0.5], [0.5, 0]]},
+            },
+        },
+        {
             "id": "shared-coin", "label": "Shared-coin audit", "operation": "audit",
             "model": {
                 "nodes": fork_nodes, "parents": fork_edges,
@@ -134,7 +144,7 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._allow_local():
             return
-        if self.path not in ("/api/compare", "/api/audit", "/api/run", "/api/replay", "/api/edge", "/api/edge-scan"):
+        if self.path not in ("/api/compare", "/api/audit", "/api/run", "/api/replay", "/api/edge", "/api/edge-scan", "/api/edge-search"):
             self._json(404, {"error": "Operation not found."})
             return
         if self.headers.get_content_type() != "application/json":
@@ -165,6 +175,8 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                 result = compare_added_edge(data.get("model"), data.get("parent"), data.get("child"))
             elif self.path == "/api/edge-scan":
                 result = scan_added_edges(data.get("model"))
+            elif self.path == "/api/edge-search":
+                result = search_added_edges(data.get("model"))
             else:
                 model = Model.from_dict(data.get("model"))
                 if self.path == "/api/compare":

@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from graphweft.edge_study import compare_added_edge, scan_added_edges
+from graphweft.edge_study import compare_added_edge, scan_added_edges, search_added_edges
 from graphweft.experiments import verify_run
 from graphweft.model import Model
 from graphweft.transport import cost_matrices
@@ -96,3 +96,45 @@ class EdgeStudyTests(unittest.TestCase):
         after = study["expanded"]["result"]["constrained"]["cost"]
         self.assertLess(after, before)
         self.assertEqual(study["cost_decrease"], 0)
+
+    def test_two_edges_together_close_the_gap_when_single_additions_have_no_gain(self):
+        model = json.loads((EXAMPLES / "interacting_edges.json").read_text())
+        scan = scan_added_edges(model)
+        self.assertEqual([study["cost_decrease"] for study in scan["edges"]], [0, 0, 0])
+
+        search = search_added_edges(model)
+        self.assertEqual(search["graphs_evaluated"], 8)
+        self.assertEqual(search["minimum_edges_to_ordinary"], 2)
+        self.assertEqual([study["cost_decrease"] for study in search["best_additions"]], [0, 0.25, 0.25])
+        winning = search["best_additions"][1]
+        self.assertEqual(winning["added_edges"], [["A", "C"], ["B", "C"]])
+        self.assertEqual(winning["original_graph_audit"]["failures"][0]["node"], "C")
+        self.assertEqual(verify_run(winning["expanded"])["result"]["constrained"]["cost"], 0.25)
+
+    def test_search_keeps_the_full_cost_objective_when_expanding_multiple_tables(self):
+        model = {
+            "nodes": ["A", "B", "C", "D"], "parents": {"A": [], "B": [], "C": ["B"], "D": []},
+            "source": [0.0625] * 16, "target": [0.0625] * 16,
+            "cost_factors": {"C": np.arange(16).reshape(4, 4).tolist(), "D": [[3, 1], [2, 4]]},
+        }
+        search = search_added_edges(model)
+        self.assertEqual(search["graphs_evaluated"], 32)
+        expected = cost_matrices(Model.from_dict(model))
+        for study in search["best_additions"]:
+            expanded = study["expanded"]["input"]["model"]
+            self.assertEqual(expanded["source"], model["source"])
+            self.assertEqual(expanded["target"], model["target"])
+            np.testing.assert_array_equal(cost_matrices(Model.from_dict(expanded)), expected)
+
+    def test_minimum_edge_count_reports_unreachable_and_already_optimal_cases(self):
+        fork = json.loads((EXAMPLES / "binary_fork.json").read_text())
+        search = search_added_edges(fork)
+        self.assertEqual(search["graphs_evaluated"], 2)
+        self.assertIsNone(search["minimum_edges_to_ordinary"])
+        self.assertEqual(search["best_additions"][-1]["expanded"]["result"]["cost_gap"], 0.5)
+
+        complete = json.loads((EXAMPLES / "ordered_control.json").read_text())
+        search = search_added_edges(complete)
+        self.assertEqual(search["graphs_evaluated"], 1)
+        self.assertEqual(search["minimum_edges_to_ordinary"], 0)
+        self.assertEqual(search["best_additions"], [])
