@@ -6,12 +6,13 @@ from pathlib import Path
 from .audit import audit_plan
 from .edge_study import EDGE_SEARCH_SCHEMA, compare_added_edge, scan_added_edges, search_added_edges
 from .experiments import MAX_RUN_BYTES, verify_saved_document
+from .json_io import decode_json
 from .model import Model
 from .transport import compare
 
 
 def read_json(path):
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    return decode_json(Path(path).read_bytes())
 
 
 def read_run(path):
@@ -19,10 +20,7 @@ def read_run(path):
         contents = source.read(MAX_RUN_BYTES + 1)
     if len(contents) > MAX_RUN_BYTES:
         raise ValueError("Run files are limited to 1 MiB.")
-    try:
-        return json.loads(contents)
-    except RecursionError:
-        raise ValueError("The run file is nested too deeply.") from None
+    return decode_json(contents)
 
 
 def summarize(report):

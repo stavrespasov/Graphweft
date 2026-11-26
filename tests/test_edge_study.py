@@ -5,7 +5,7 @@ import unittest
 import numpy as np
 
 from graphweft.edge_study import compare_added_edge, scan_added_edges, search_added_edges
-from graphweft.experiments import verify_run
+from graphweft.experiments import MAX_RUN_BYTES, verify_run, verify_saved_document
 from graphweft.model import Model
 from graphweft.transport import cost_matrices
 
@@ -138,3 +138,14 @@ class EdgeStudyTests(unittest.TestCase):
         self.assertEqual(search["graphs_evaluated"], 1)
         self.assertEqual(search["minimum_edges_to_ordinary"], 0)
         self.assertEqual(search["best_additions"], [])
+
+    def test_maximum_edge_search_replays_within_the_file_budget(self):
+        nodes = list("ABCD")
+        model = {"nodes": nodes, "parents": {node: [] for node in nodes},
+                 "source": [0.0625] * 16, "target": [0.0625] * 16}
+        search = search_added_edges(model)
+        self.assertEqual(search["graphs_evaluated"], 64)
+        self.assertEqual([len(study["added_edges"]) for study in search["best_additions"]], list(range(1, 7)))
+        payload = json.dumps(search, indent=2).encode()
+        self.assertLessEqual(len(payload), MAX_RUN_BYTES)
+        self.assertEqual(verify_saved_document(json.loads(payload)), search)

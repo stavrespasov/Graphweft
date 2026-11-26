@@ -6,6 +6,7 @@ from itertools import product
 from .audit import audit_plan
 from .edge_study import compare_added_edge, scan_added_edges, search_added_edges
 from .experiments import MAX_RUN_BYTES, create_run, verify_saved_document
+from .json_io import decode_json
 from .model import Model
 from .transport import compare
 
@@ -114,8 +115,11 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             "Content-Security-Policy",
             "default-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'",
         )
-        self.end_headers()
-        self.wfile.write(content)
+        try:
+            self.end_headers()
+            self.wfile.write(content)
+        except (ConnectionError, TimeoutError):
+            self.close_connection = True
 
     def _json(self, status, body):
         payload = json.dumps(body, allow_nan=False, separators=(",", ":")).encode("utf-8")
@@ -150,19 +154,35 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
         if self.headers.get_content_type() != "application/json":
             self._json(415, {"error": "Send an application/json request."})
             return
-        try:
-            size = int(self.headers.get("Content-Length", "0"))
-        except ValueError:
-            size = 0
         replay = self.path == "/api/replay"
-        if size > (MAX_RUN_BYTES if replay else _MAX_BODY_BYTES):
+        limit = MAX_RUN_BYTES if replay else _MAX_BODY_BYTES
+        lengths = self.headers.get_all("Content-Length", [])
+        length = lengths[0].strip() if len(lengths) == 1 else ""
+        if self.headers.get("Transfer-Encoding") is not None or not length.isascii() or not length.isdigit():
+            self._json(400, {"error": "Send a single valid Content-Length for the JSON body."})
+            return
+        digits = length.lstrip("0") or "0"
+        if len(digits) > len(str(limit)) or int(digits) > limit:
             self._json(413, {"error": "Run files are limited to 1 MiB." if replay else "Input exceeds 64 KiB."})
             return
+        size = int(digits)
         try:
-            data = json.loads(self.rfile.read(max(0, size)))
-            if not isinstance(data, dict):
-                raise ValueError
-        except (ValueError, RecursionError):
+            contents = self.rfile.read(size)
+        except TimeoutError:
+            self._json(408, {"error": "Timed out waiting for the JSON request body."})
+            return
+        except ConnectionError:
+            self.close_connection = True
+            return
+        if len(contents) != size:
+            self._json(400, {"error": "The JSON request body ended before the stated length."})
+            return
+        try:
+            data = decode_json(contents)
+        except ValueError as error:
+            self._json(400, {"error": f"Invalid JSON. {error}"})
+            return
+        if not isinstance(data, dict):
             self._json(400, {"error": "Send a valid JSON object."})
             return
 

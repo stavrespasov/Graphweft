@@ -179,3 +179,5 @@ python -m unittest discover -s tests -v
 ```
 
 The full suite also checks the shared-coin counterexample, empty-graph decomposition, single-node agreement with ordinary OT, and the collider solver against independent enumeration. Edge comparison tests check that adding a parent preserves the entire cost matrix and that both resulting runs can be verified.
+
+The failure-mode inventory maps model validation, numerical, file replay, server, browser, and study failures to their regression tests. It includes commands for running the browser suite. [Failure modes and regression checks](docs/failure-modes.md)

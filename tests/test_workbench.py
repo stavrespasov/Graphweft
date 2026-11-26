@@ -1,13 +1,19 @@
+from concurrent.futures import ThreadPoolExecutor
+from email.message import Message
 import json
 import unittest
-from http.client import HTTPConnection
+from http.client import HTTPConnection, HTTPResponse
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from socket import SHUT_WR, create_connection
 from threading import Thread
+from unittest.mock import Mock, patch
 
+from graphweft.experiments import MAX_RUN_BYTES
 from graphweft.server import WorkbenchHandler
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
+JSON_HEADER = {"Content-Type": "application/json"}
 
 
 class WorkbenchTests(unittest.TestCase):
@@ -31,6 +37,17 @@ class WorkbenchTests(unittest.TestCase):
             return response.status, response.getheader("Content-Type"), response.read()
         finally:
             connection.close()
+
+    def framed_request(self, headers, body, finish=True, path="/api/run"):
+        port = self.server.server_port
+        request = f"POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\n"
+        with create_connection(("127.0.0.1", port), timeout=3) as connection:
+            connection.sendall((request + headers + "\r\n").encode("ascii") + body)
+            if finish:
+                connection.shutdown(SHUT_WR)
+            with HTTPResponse(connection) as response:
+                response.begin()
+                return response.status, json.loads(response.read())
 
     def test_assets_and_packaged_examples(self):
         for path, expected_type in (
@@ -94,6 +111,106 @@ class WorkbenchTests(unittest.TestCase):
 
         status, _, _ = self.request("GET", "/missing")
         self.assertEqual(status, 404)
+
+    def test_ambiguous_json_is_rejected_before_dispatch(self):
+        cases = (b'{"model":{},"model":{}}', b'{"unknown":NaN}', b'{"unknown":1e309}',
+                 b'[' * 10_000 + b'0' + b']' * 10_000)
+        for body in cases:
+            with self.subTest(body=body[:40]):
+                status, _, payload = self.request("POST", "/api/run", body, JSON_HEADER)
+                self.assertEqual(status, 400)
+                self.assertIn("JSON", json.loads(payload)["error"])
+
+    def test_content_length_must_describe_one_complete_body(self):
+        cases = (
+            ("", "Content-Length"),
+            ("Content-Length: -2\r\n", "Content-Length"),
+            ("Content-Length: 2\r\nContent-Length: 2\r\n", "Content-Length"),
+            ("Transfer-Encoding: chunked\r\n", "Content-Length"),
+            ("Content-Length: 12\r\n", "ended before"),
+        )
+        for headers, message in cases:
+            with self.subTest(headers=headers):
+                status, payload = self.framed_request(headers, b"{}")
+                self.assertEqual(status, 400)
+                self.assertIn(message, payload["error"])
+        status, _ = self.framed_request("Content-Length: " + "9" * 5000 + "\r\n", b"")
+        self.assertEqual(status, 413)
+
+    def test_stalled_request_body_times_out(self):
+        def short_setup(handler):
+            original_setup(handler)
+            handler.request.settimeout(0.2)
+
+        original_setup = WorkbenchHandler.setup
+        with patch.object(WorkbenchHandler, "setup", short_setup):
+            status, payload = self.framed_request("Content-Length: 12\r\n", b"{}", finish=False)
+        self.assertEqual(status, 408)
+        self.assertIn("Timed out", payload["error"])
+
+    def test_disconnected_client_abandons_response(self):
+        handler = object.__new__(WorkbenchHandler)
+        handler.send_response, handler.send_header, handler.end_headers = Mock(), Mock(), Mock()
+        handler.wfile = Mock()
+        handler.wfile.write.side_effect = BrokenPipeError
+        handler._send(200, b"{}", "application/json")
+        self.assertTrue(handler.close_connection)
+
+    def test_disconnected_client_abandons_request_before_solving(self):
+        handler = object.__new__(WorkbenchHandler)
+        handler.path = "/api/run"
+        handler.headers = Message()
+        handler.headers["Content-Type"] = "application/json"
+        handler.headers["Content-Length"] = "20"
+        handler._allow_local = Mock(return_value=True)
+        handler.rfile = Mock()
+        handler.rfile.read.side_effect = ConnectionResetError
+        with patch("graphweft.server.create_run") as solve:
+            handler.do_POST()
+        self.assertTrue(handler.close_connection)
+        solve.assert_not_called()
+
+    def test_request_and_replay_size_limits(self):
+        model = json.loads((EXAMPLES / "binary_chain.json").read_text())
+        data = json.dumps({"operation": "compare", "model": model}).encode()
+        status, _, result = self.request("POST", "/api/run", data.ljust(64 * 1024), JSON_HEADER)
+        self.assertEqual(status, 200)
+        status, _ = self.framed_request(f"Content-Length: {64 * 1024 + 1}\r\n", b"")
+        self.assertEqual(status, 413)
+        status, _, _ = self.request("POST", "/api/replay", result.ljust(MAX_RUN_BYTES), JSON_HEADER)
+        self.assertEqual(status, 200)
+        status, _ = self.framed_request(f"Content-Length: {MAX_RUN_BYTES + 1}\r\n", b"", path="/api/replay")
+        self.assertEqual(status, 413)
+
+    def test_solver_failure_returns_a_clean_error_and_the_next_request_succeeds(self):
+        model = json.loads((EXAMPLES / "binary_chain.json").read_text())
+        body = json.dumps({"operation": "compare", "model": model})
+        with patch("graphweft.server.create_run", side_effect=RuntimeError("internal failure")):
+            status, _, payload = self.request("POST", "/api/run", body, JSON_HEADER)
+        self.assertEqual(status, 500)
+        self.assertIn("numerical checks", json.loads(payload)["error"])
+        self.assertNotIn(b"internal failure", payload)
+        status, _, payload = self.request("POST", "/api/run", body, JSON_HEADER)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(payload)["result"]["cost_gap"], 0.5)
+
+    def test_overlapping_requests_keep_models_and_costs_separate(self):
+        fixtures = (("binary_chain.json", 1), ("binary_fork.json", 1.5), ("interacting_edges.json", 0.5))
+
+        def run(request):
+            filename, expected = request
+            model = json.loads((EXAMPLES / filename).read_text())
+            body = json.dumps({"operation": "compare", "model": model})
+            status, _, payload = self.request("POST", "/api/run", body, JSON_HEADER)
+            result = json.loads(payload)
+            return status, result["input"]["model"] == model, result["result"]["constrained"]["cost"], expected
+
+        with ThreadPoolExecutor(max_workers=6) as workers:
+            results = list(workers.map(run, fixtures * 2))
+        for status, same_input, cost, expected in results:
+            self.assertEqual(status, 200)
+            self.assertTrue(same_input)
+            self.assertEqual(cost, expected)
 
     def test_edge_comparison_returns_the_cross_audit_and_expanded_run(self):
         model = json.loads((EXAMPLES / "binary_collider.json").read_text())

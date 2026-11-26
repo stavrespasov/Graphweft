@@ -60,9 +60,10 @@ function column(row, title) {
   row.append(header);
 }
 
-function parse(field, label) {
+function validatedJson(field, label) {
   try {
-    return JSON.parse(field.value);
+    JSON.parse(field.value);
+    return field.value;
   } catch {
     byId("inputs").open = true;
     field.focus();
@@ -493,9 +494,10 @@ async function requestRun(message, load, imported = false) {
 function runExperiment() {
   const mode = operation.value;
   return requestRun(mode === "compare" ? "Solving transport…" : "Checking the plan…", (signal) => {
-    const payload = { operation: mode, model: parse(modelField, "model") };
-    if (mode === "audit") payload.plan = parse(planField, "coupling matrix");
-    return postRun("/api/run", JSON.stringify(payload), signal);
+    // Preserve each complete JSON value so the server can detect duplicate keys and nonfinite numbers.
+    const fields = [`"operation":${JSON.stringify(mode)}`, `"model":${validatedJson(modelField, "model")}`];
+    if (mode === "audit") fields.push(`"plan":${validatedJson(planField, "coupling matrix")}`);
+    return postRun("/api/run", `{${fields.join(",")}}`, signal);
   });
 }
 

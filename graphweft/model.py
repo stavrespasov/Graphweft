@@ -14,8 +14,11 @@ def marginal(tensor, nodes):
 
 def nonnegative_array(raw, shape, name):
     try:
-        array = np.asarray(raw)
-        if array.shape != shape or array.dtype.kind not in "iuf":
+        array = np.asarray(raw, dtype=object)
+        if array.shape != shape or any(
+            not isinstance(value, (int, float, np.integer, np.floating)) or isinstance(value, (bool, np.bool_))
+            for value in array.flat
+        ):
             raise ValueError
         array = array.astype(np.float64)
     except (TypeError, ValueError, OverflowError):
