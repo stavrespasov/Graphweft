@@ -1,5 +1,7 @@
 # GraphWeft
 
+[![v0.1.0 DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24582991.svg)](https://doi.org/10.5281/zenodo.24582991)
+
 GraphWeft computes ordinary and **graph-bicausal optimal transport** for compatible laws on one to four binary nodes. Given a directed acyclic graph, it returns both optimal couplings and pinpoints the conditional probabilities that make a plan inadmissible.
 
 ## Reproducible studies
