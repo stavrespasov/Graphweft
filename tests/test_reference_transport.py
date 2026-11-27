@@ -1,3 +1,4 @@
+from fractions import Fraction
 import json
 from itertools import combinations, product
 from math import prod
@@ -13,6 +14,7 @@ from graphweft.model import Model
 from graphweft.transport import compare
 from reference_transport import reference_optima
 from studies.dependency_strength import run as strength_study
+from studies.edge_complementarity import run as complementarity_study
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 STUDIES = EXAMPLES.parent / "studies"
@@ -105,6 +107,20 @@ class ReferenceTransportTests(unittest.TestCase):
                 expected_constrained = min(strength, 0.5) if graph in ("both_into_c", "complete") else strength
                 self.assertAlmostEqual(ordinary, strength / 4, places=10)
                 self.assertAlmostEqual(constrained, expected_constrained / 2, places=10)
+
+    def test_greedy_comparison_distinguishes_a_plateau_from_a_strict_failure(self):
+        plateau = complementarity_study.compare_searches(2)
+        self.assertEqual(plateau["stop_at_plateau"]["edges"], ())
+        self.assertEqual(plateau["fixed_budget_greedy"], plateau["optimum"])
+
+        for parents in (2, 3):
+            with self.subTest(parents=parents):
+                strict = complementarity_study.compare_searches(parents, Fraction(1, 64))
+                greedy = strict["fixed_budget_greedy"]
+                self.assertEqual(greedy["edges"][0], "U->V")
+                self.assertEqual(len(greedy["edges"]), parents)
+                self.assertEqual(greedy["savings"], 1 / 128)
+                self.assertEqual(strict["optimum"]["savings"], 1 / 8)
 
     def test_interacting_edges_search_matches_reference_over_all_subsets(self):
         specification = json.loads((EXAMPLES / "interacting_edges.json").read_text())

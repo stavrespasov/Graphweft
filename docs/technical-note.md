@@ -51,6 +51,8 @@ In the first-order Bikeshare witness, the ordinary plan assigns 0% probability t
 
 A controlled four-node experiment varies a noisy parity dependency and holds both laws and all mismatch costs fixed across five graphs at each setting. Adding both edges into an intermediate node lowers the optimum only above strength 0.5. The threshold follows from the costs of mismatching the intermediate and final nodes. The study derives closed-form optima and simulates how often a finite-sample fit detects the benefit from adding the edges. [Four-node dependency-strength study](../studies/dependency_strength/README.md)
 
+The zero singleton savings and positive joint savings give a counterexample to submodularity. A separate analytic construction adds a single improving edge that can force fixed-budget greedy to miss the best combination on seven nodes. [Edge complementarity and greedy search](../studies/edge_complementarity/README.md)
+
 ## 4. Verification and performance
 
 A separate reference program uses a full-coupling LP for ordinary transport and a full-coupling MILP for graph-bicausal transport. It enforces both prescribed conditional marginals at every paired history. For histories with the same paired parents, a shared binary choice fixes a zero cell in the local $2\times2$ kernel. The fixed marginals determine the rest of the kernel. The endpoint argument justifies this restriction for value checks. Tests cover 128 seeded instances across all 64 four-node edge patterns in one topological order, analytic fixtures, and the three experiment rows above. Saved witnesses are replayed and audited separately. [Independent reference](../tests/reference_transport.py) · [Reference tests](../tests/test_reference_transport.py)

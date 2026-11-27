@@ -16,6 +16,8 @@ Costs are expected mismatches across three binary time slots. Each study include
 
 To reproduce the comparison in the workbench from a fresh checkout, follow the [reviewer walkthrough](studies/bike_sharing/REVIEW.md). A [controlled four-node study](studies/dependency_strength/README.md) holds both laws and the cost fixed across graph comparisons and shows when two added edges start to lower the optimum.
 
+The four-node result gives a counterexample to diminishing returns. A seven-node extension shows why adding the best single edge at each step can miss almost all the possible savings. The larger cases use analytic optima. [Edge complementarity and greedy search](studies/edge_complementarity/README.md)
+
 ## Browser workbench
 
 From a repository checkout or extracted source distribution, use Python 3.10 or newer in a virtual environment.
